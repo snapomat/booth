@@ -36,7 +36,8 @@ jobs:
           pnpm test
 
       - name: Build (AppImage + deb)
-        run: pnpm dist:linux
+        # Nur Artefakte bauen, kein GitHub-Release veröffentlichen (kein Token nötig).
+        run: pnpm dist:linux -- --publish never
 
       - uses: actions/upload-artifact@v4
         with:
