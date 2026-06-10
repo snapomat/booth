@@ -37,7 +37,7 @@ jobs:
 
       - name: Build (AppImage + deb)
         # Nur Artefakte bauen, kein GitHub-Release veröffentlichen (kein Token nötig).
-        run: pnpm dist:linux -- --publish never
+        run: pnpm dist:linux:ci
 
       - uses: actions/upload-artifact@v4
         with:
