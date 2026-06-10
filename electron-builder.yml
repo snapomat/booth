@@ -1,0 +1,32 @@
+appId: de.snapomat.app
+productName: Snapomat
+directories:
+  buildResources: build
+files:
+  - out/**
+  - package.json
+# sharp ist ein natives Modul und muss aus dem asar ausgepackt werden.
+asarUnpack:
+  - node_modules/sharp/**
+  - node_modules/@img/**
+# Mitgelieferte Standard-Hintergründe (offline verfügbar im Kiosk).
+extraResources:
+  - resources/backgrounds/**
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Graphics
+  # Kiosk-Gerät: Kategorie/Icon später anpassen.
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.photography
+  # Lokaler/persönlicher Build: nicht signieren (vermeidet Keychain-Hänger).
+  # Für Weitergabe an andere: Developer-ID-Zertifikat + Notarisierung nötig.
+  identity: null
+  # Kamera-Zugriff (Webcam-Quelle) – ohne diesen Eintrag verweigert macOS getUserMedia.
+  extendInfo:
+    NSCameraUsageDescription: Wird für Live-Vorschau und Aufnahmen der Photobooth benötigt.
+    NSMicrophoneUsageDescription: Nicht genutzt – nur aus Kompatibilitätsgründen gesetzt.

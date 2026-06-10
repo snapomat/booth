@@ -1,0 +1,6 @@
+# pnpm: steuert, welche Pakete Post-Install-Build-Scripts ausführen dürfen.
+allowBuilds:
+  electron: true
+  esbuild: true
+  sharp: true
+  electron-winstaller: false
