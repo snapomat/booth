@@ -20,9 +20,6 @@ linux:
   maintainer: Snapomat <mail@hueske.digital>
   executableName: snapomat
   synopsis: Snapomat Fotobox
-  # Fenster-Zuordnung im Desktop (WM_CLASS ↔ .desktop-Eintrag)
-  desktopName: snapomat.desktop
-  syncDesktopName: true
 mac:
   target:
     - dmg
