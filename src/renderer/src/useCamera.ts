@@ -55,6 +55,12 @@ export function useCamera(): UseCamera {
           audio: false
         })
         streamRef.current = stream
+        // Kamera abgezogen / Stream beendet → sichtbar machen.
+        stream.getVideoTracks()[0]?.addEventListener(
+          'ended',
+          () => setError('Webcam wurde getrennt'),
+          { once: true }
+        )
         if (videoRef.current) {
           videoRef.current.srcObject = stream
           await videoRef.current.play()

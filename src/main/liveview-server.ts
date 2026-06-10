@@ -1,6 +1,9 @@
 import { createServer, type Server } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import type { CameraManager } from './camera'
+import { createLogger } from './util/logger'
+
+const log = createLogger('liveview-server')
 
 /**
  * Serviert den Liveview als `multipart/x-mixed-replace`-MJPEG-Stream auf
@@ -28,20 +31,35 @@ export class LiveviewServer {
         Pragma: 'no-cache'
       })
 
+      let broken = false
       const write = (frame: Buffer): void => {
-        if (res.writableEnded) return
-        res.write(
-          `--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
-        )
-        res.write(frame)
-        res.write('\r\n')
+        if (broken || res.writableEnded || res.destroyed) return
+        try {
+          res.write(
+            `--${boundary}\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`
+          )
+          res.write(frame)
+          res.write('\r\n')
+        } catch {
+          // Client weg / EPIPE → Abonnement beenden, nicht crashen.
+          broken = true
+          unsubscribe()
+        }
       }
 
+      const unsubscribe = this.camera.onFrame(write)
+      const cleanup = (): void => {
+        broken = true
+        unsubscribe()
+      }
+      req.on('close', cleanup)
+      res.on('error', cleanup)
       const latest = this.camera.getLatestFrame()
       if (latest) write(latest)
-      const unsubscribe = this.camera.onFrame(write)
-      req.on('close', unsubscribe)
     })
+
+    this.server.on('error', (err) => log.error('Liveview-Server-Fehler', err))
+    this.server.on('clientError', (_err, socket) => socket.destroy())
 
     await new Promise<void>((resolve) => {
       this.server!.listen(0, '127.0.0.1', () => resolve())

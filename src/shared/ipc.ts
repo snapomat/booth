@@ -7,6 +7,8 @@ export const IPC = {
   pickImageFile: 'files:pickImage',
   readImageDataUrl: 'files:readImageDataUrl',
   getDefaultBackgrounds: 'files:defaultBackgrounds',
+  cameraDiagnostics: 'camera:diagnostics',
+  installGphoto2: 'camera:installGphoto2',
   resolveCameraSource: 'camera:resolveSource',
   liveviewUrl: 'camera:liveviewUrl',
   startLiveview: 'camera:startLiveview',

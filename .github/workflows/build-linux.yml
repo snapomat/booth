@@ -1,0 +1,47 @@
+name: Build Linux
+
+# Electron baut gegen glibc → Ubuntu-Runner (NICHT Alpine/musl).
+# Ergebnis läuft auf Debian/Ubuntu (AppImage + .deb).
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+jobs:
+  build:
+    # 22.04 für breite glibc-Kompatibilität (läuft auch auf älteren Debians).
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # postinstall (electron-builder install-app-deps) baut native Module (sharp)
+      # gegen die Electron-ABI; sharp-linux-x64 wird als Optional-Dep mitgeholt.
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Lint & Typecheck & Test
+        run: |
+          pnpm lint
+          pnpm typecheck
+          pnpm test
+
+      - name: Build (AppImage + deb)
+        run: pnpm dist:linux
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: snapomat-linux
+          path: |
+            dist/*.AppImage
+            dist/*.deb
+          if-no-files-found: error

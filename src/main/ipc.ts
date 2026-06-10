@@ -1,6 +1,6 @@
 import { app, dialog, ipcMain } from 'electron'
 import { extname, join } from 'node:path'
-import { readdir, readFile, writeFile } from 'node:fs/promises'
+import { readdir, readFile, writeFile, rm } from 'node:fs/promises'
 import sharp from 'sharp'
 import { randomUUID } from 'node:crypto'
 import { IPC } from '@shared/ipc'
@@ -16,6 +16,11 @@ import {
 } from './config'
 import { composePrint } from './composite'
 import { listPrinters, printFile } from './print'
+import { accentFromPixels, DEFAULT_ACCENT } from './util/color'
+import { createLogger } from './util/logger'
+import { runCommand } from './util/exec'
+
+const log = createLogger('ipc')
 
 /** Im Speicher gehaltene, druckfertige Aufnahmen der aktuellen Sitzung. */
 const captures = new Map<string, string>()
@@ -48,64 +53,18 @@ function backgroundsDir(): string {
     : join(__dirname, '..', '..', 'resources', 'backgrounds')
 }
 
-/** HSL → Hex (h in Grad, s/l in 0–1). */
-function hslToHex(h: number, s: number, l: number): string {
-  const c = (1 - Math.abs(2 * l - 1)) * s
-  const x = c * (1 - Math.abs(((h / 60) % 2) - 1))
-  const m = l - c / 2
-  const [r, g, b] =
-    h < 60 ? [c, x, 0]
-    : h < 120 ? [x, c, 0]
-    : h < 180 ? [0, c, x]
-    : h < 240 ? [0, x, c]
-    : h < 300 ? [x, 0, c]
-    : [c, 0, x]
-  const hex = (v: number): string => Math.round((v + m) * 255).toString(16).padStart(2, '0')
-  return `#${hex(r)}${hex(g)}${hex(b)}`
-}
-
-/**
- * Leitet eine satte, mittelhelle Akzentfarbe aus einem Bild ab. Statt der
- * (oft neutralen) Dominanten wird der nach Sättigung gewichtete Durchschnitts-
- * Farbton der bunten Bildbereiche genommen – dunkler Text bleibt lesbar.
- */
+/** Akzentfarbe aus dem Bild ableiten (Farb-Logik im util/color-Modul, getestet). */
 async function imageAccent(path: string): Promise<string> {
-  const fallback = '#e8a23c'
   try {
-    const { data } = await sharp(path)
+    const { data, info } = await sharp(path)
       .resize(64, 64, { fit: 'cover' })
       .removeAlpha()
       .raw()
       .toBuffer({ resolveWithObject: true })
-    let sumSin = 0
-    let sumCos = 0
-    let wSat = 0
-    let wTot = 0
-    for (let i = 0; i < data.length; i += 3) {
-      const r = data[i] / 255
-      const g = data[i + 1] / 255
-      const b = data[i + 2] / 255
-      const max = Math.max(r, g, b)
-      const min = Math.min(r, g, b)
-      const d = max - min
-      if (d === 0) continue
-      const sat = d / max
-      const w = sat * max // bunte, nicht zu dunkle Pixel bevorzugen
-      let h = max === r ? (((g - b) / d) % 6 + 6) % 6 : max === g ? (b - r) / d + 2 : (r - g) / d + 4
-      h *= 60
-      const rad = (h * Math.PI) / 180
-      sumSin += Math.sin(rad) * w
-      sumCos += Math.cos(rad) * w
-      wSat += sat * w
-      wTot += w
-    }
-    if (wTot < 1e-3) return fallback // (nahezu) graustufiges Bild
-    let hue = (Math.atan2(sumSin, sumCos) * 180) / Math.PI
-    if (hue < 0) hue += 360
-    const sat = Math.min(0.85, Math.max(0.55, wSat / wTot))
-    return hslToHex(hue, sat, 0.58)
-  } catch {
-    return fallback
+    return accentFromPixels(data, info.channels)
+  } catch (err) {
+    log.warn(`Akzentfarbe für ${path} fehlgeschlagen`, err)
+    return DEFAULT_ACCENT
   }
 }
 
@@ -120,11 +79,14 @@ export async function resolveCameraSource(
 /** Speichert ein druckfertiges Bild und liefert das Renderer-Ergebnis. */
 async function persistCapture(original: Buffer): Promise<CaptureResult> {
   const { jpeg, dataUrl } = await composePrint(original)
+  // Kleines Thumbnail für die Collage – spart RAM & Dekodier-Last im Renderer.
+  const thumb = await sharp(jpeg).resize(480).jpeg({ quality: 68 }).toBuffer()
+  const thumbUrl = `data:image/jpeg;base64,${thumb.toString('base64')}`
   const id = randomUUID()
   const path = join(getPhotosDir(), `${id}.jpg`)
   await writeFile(path, jpeg)
   captures.set(id, path)
-  return { id, dataUrl }
+  return { id, dataUrl, thumbUrl }
 }
 
 export function registerIpc(camera: CameraManager, liveview: LiveviewServer): void {
@@ -173,6 +135,32 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     }
   })
 
+  ipcMain.handle(IPC.cameraDiagnostics, () => ({
+    gphoto2Missing: camera.isGphoto2Missing(),
+    cameraDetected: camera.isAvailable(),
+    platform: process.platform
+  }))
+
+  ipcMain.handle(IPC.installGphoto2, async () => {
+    if (process.platform !== 'linux') {
+      return {
+        ok: false,
+        message: 'Automatische Installation nur unter Linux (macOS: brew install gphoto2).'
+      }
+    }
+    try {
+      // pkexec öffnet einen grafischen Admin-Dialog (PolicyKit).
+      await runCommand('pkexec', ['apt-get', 'install', '-y', 'gphoto2', 'libgphoto2-6'], {
+        timeoutMs: 180_000
+      })
+      await camera.detect()
+      return { ok: true, message: 'gphoto2 wurde installiert.' }
+    } catch (err) {
+      log.error('gphoto2-Installation fehlgeschlagen', err)
+      return { ok: false, message: err instanceof Error ? err.message : 'Installation fehlgeschlagen' }
+    }
+  })
+
   ipcMain.handle(IPC.resolveCameraSource, () => resolveCameraSource(camera))
 
   ipcMain.handle(IPC.liveviewUrl, () => liveview.url())
@@ -181,9 +169,18 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
   ipcMain.handle(IPC.stopLiveview, () => camera.stopLiveview())
 
   ipcMain.handle(IPC.capture, async () => {
-    const original = await camera.capture(join(getPhotosDir(), `${randomUUID()}.orig.jpg`))
-    // Liveview NICHT wieder starten – Idle lässt die Kamera ruhen (Spiegel/Sensor).
-    return persistCapture(original)
+    const origPath = join(getPhotosDir(), `${randomUUID()}.orig.jpg`)
+    try {
+      const original = await camera.capture(origPath)
+      // Liveview NICHT wieder starten – Idle lässt die Kamera ruhen (Spiegel/Sensor).
+      return await persistCapture(original)
+    } catch (err) {
+      log.error('Aufnahme/Speichern fehlgeschlagen', err)
+      throw err
+    } finally {
+      // Original-Temp nicht aufheben – wir behalten nur das komponierte Bild.
+      void rm(origPath, { force: true }).catch(() => {})
+    }
   })
 
   ipcMain.handle(IPC.captureFromDataUrl, async (_e, dataUrl: unknown) => {
@@ -199,6 +196,11 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     if (!path) throw new Error('Aufnahme nicht gefunden')
     const settings = await getSettings()
     if (!settings.printerName) throw new Error('Kein Drucker konfiguriert')
-    await printFile(path, settings.printerName, settings.printsPerCapture)
+    try {
+      await printFile(path, settings.printerName, settings.printsPerCapture)
+    } catch (err) {
+      log.error('Druck fehlgeschlagen', err)
+      throw err
+    }
   })
 }

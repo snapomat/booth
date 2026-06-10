@@ -34,7 +34,8 @@ export default function App(): React.JSX.Element {
   const [bgDataUrl, setBgDataUrl] = useState<string | null>(null)
   const [defaults, setDefaults] = useState<DefaultBackground[]>([])
   const [bgIndex, setBgIndex] = useState(0)
-  const [history, setHistory] = useState<CaptureResult[]>([])
+  // Nur Thumbnails der letzten Fotos halten – das große Bild existiert nur einmal.
+  const [history, setHistory] = useState<{ id: string; thumbUrl: string }[]>([])
   const busy = useRef(false)
   const cancelled = useRef(false)
 
@@ -111,7 +112,7 @@ export default function App(): React.JSX.Element {
       const result = await cam.capture()
       await cam.stopLiveview()
       setCapture(result)
-      setHistory((h) => [result, ...h].slice(0, 12))
+      setHistory((h) => [{ id: result.id, thumbUrl: result.thumbUrl }, ...h].slice(0, 12))
       setReviewLeft(settings?.reviewTimeoutSeconds ?? 3)
       setPhase('review')
     } catch (err) {
@@ -166,6 +167,8 @@ export default function App(): React.JSX.Element {
   const chosenDefault = settings?.backgroundDefault
     ? (defaults.find((b) => b.name === settings.backgroundDefault)?.dataUrl ?? null)
     : null
+  // Aktuell sichtbarer Start-Hintergrund (eigenes Bild → Default → Slideshow-Frame).
+  const activeBg = bgDataUrl ?? chosenDefault ?? (defaults[bgIndex] ?? defaults[0])?.dataUrl ?? null
 
   return (
     <div className="grain relative h-full w-full overflow-hidden">
@@ -199,15 +202,18 @@ export default function App(): React.JSX.Element {
 
       {/* IDLE */}
       {phase === 'idle' && (
-        <button onClick={start} className="absolute inset-0 z-10 flex flex-col items-center justify-center">
+        <button
+          onClick={start}
+          className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-8 px-8"
+        >
           <div
             className="pointer-events-none absolute inset-0"
-            style={{ background: 'radial-gradient(60% 50% at 50% 38%, rgba(232,162,60,0.16), transparent 70%)' }}
+            style={{ background: 'radial-gradient(60% 50% at 50% 42%, rgba(232,162,60,0.16), transparent 70%)' }}
           />
 
-          {/* Branding – Logo in Akzentfarbe (CSS-Mask) */}
+          {/* Logo (Wortmarke) in Akzentfarbe (CSS-Mask) – oben als Brand */}
           <div
-            className="pointer-events-none absolute top-12 left-1/2 aspect-[1076/751] w-50 -translate-x-1/2 drop-shadow-[0_2px_16px_rgba(0,0,0,0.5)]"
+            className="pointer-events-none absolute top-6 left-1/2 aspect-[1076/751] w-36 -translate-x-1/2 drop-shadow-[0_2px_16px_rgba(0,0,0,0.5)]"
             style={{
               backgroundColor: 'var(--color-flare)',
               maskImage: `url(${logo})`,
@@ -222,24 +228,22 @@ export default function App(): React.JSX.Element {
           />
 
           {settings && (
-            <h1 className="max-w-[16ch] text-center font-display text-7xl font-light italic leading-[0.95] text-cream drop-shadow-[0_2px_20px_rgba(0,0,0,0.6)]">
+            <h1 className="max-w-[18ch] text-center font-display text-6xl font-light italic leading-tight text-cream drop-shadow-[0_2px_20px_rgba(0,0,0,0.6)]">
               {settings.welcomeText}
             </h1>
           )}
 
-          <span className="relative mt-16 grid place-items-center">
-            <span
-              className="grid h-36 w-36 place-items-center rounded-full bg-flare ring-1 ring-cream/30"
-              style={{ animation: 'breathe 2.6s ease-in-out infinite' }}
-            >
-              <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="#100b09" strokeWidth="1.6">
-                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
-                <circle cx="12" cy="13" r="4" />
-              </svg>
-            </span>
+          <span
+            className="grid h-32 w-32 place-items-center rounded-full bg-flare ring-1 ring-cream/30"
+            style={{ animation: 'breathe 2.6s ease-in-out infinite' }}
+          >
+            <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#100b09" strokeWidth="1.6">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
           </span>
 
-          <span className="mt-16 font-mono text-xs tracking-[0.4em] text-cream-dim uppercase">
+          <span className="font-mono text-xs tracking-[0.4em] text-cream-dim uppercase">
             Tippen zum Auslösen
           </span>
 
@@ -270,11 +274,20 @@ export default function App(): React.JSX.Element {
         >
           <span className="absolute top-20 flex items-center gap-4 font-display text-5xl font-light italic text-cream drop-shadow-[0_2px_16px_rgba(0,0,0,0.7)]">
             Bitte lächeln
-            <svg width="46" height="46" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M8 14s1.5 2 4 2 4-2 4-2" />
-              <line x1="9" y1="9" x2="9.01" y2="9" />
-              <line x1="15" y1="9" x2="15.01" y2="9" />
+            <svg
+              width="46"
+              height="46"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M3 12a9 9 0 1 0 18 0a9 9 0 1 0 -18 0" />
+              <path d="M9 10l.01 0" />
+              <path d="M15 10l.01 0" />
+              <path d="M9.5 15a3.5 3.5 0 0 0 5 0" />
             </svg>
           </span>
           <span
@@ -297,7 +310,17 @@ export default function App(): React.JSX.Element {
 
       {/* REVIEW */}
       {phase === 'review' && capture && (
-        <div className="absolute inset-0 z-30 overflow-hidden bg-ink/85 backdrop-blur-md">
+        <div className="absolute inset-0 z-30 overflow-hidden bg-ink">
+          {/* Start-Hintergrund wieder zeigen, aber gedimmt (Foto bleibt im Fokus) */}
+          {activeBg && (
+            <img
+              src={activeBg}
+              alt=""
+              className="absolute inset-0 h-full w-full object-cover"
+              style={{ opacity: 0.22 }}
+            />
+          )}
+
           {/* Timeout-Leiste */}
           <div className="absolute inset-x-0 top-0 z-30 h-1 bg-cream/10">
             <div
@@ -310,10 +333,10 @@ export default function App(): React.JSX.Element {
           {previous.map((p, i) => (
             <div
               key={p.id}
-              className="pointer-events-none absolute z-10 w-48 rounded-xl bg-cream p-1.5 shadow-2xl ring-1 ring-black/20"
+              className="gpu pointer-events-none absolute z-10 w-48 rounded-xl bg-cream p-1.5 shadow-2xl ring-1 ring-black/20"
               style={{ ...SCATTER[i % SCATTER.length], animation: 'printin 0.5s ease-out' }}
             >
-              <img src={p.dataUrl} alt="" className="w-full rounded-lg object-cover" />
+              <img src={p.thumbUrl} alt="" className="w-full rounded-lg object-cover" />
             </div>
           ))}
 
@@ -322,7 +345,7 @@ export default function App(): React.JSX.Element {
             <img
               src={capture.dataUrl}
               alt="Aufnahme"
-              className="max-h-[52vh] max-w-[64vw] rounded-2xl object-contain shadow-[0_30px_90px_-15px_rgba(0,0,0,0.9)] ring-1 ring-cream/20"
+              className="gpu max-h-[52vh] max-w-[64vw] rounded-2xl object-contain shadow-[0_30px_90px_-15px_rgba(0,0,0,0.9)] ring-1 ring-cream/20"
               style={{ animation: 'printin 0.5s ease-out' }}
             />
 
@@ -385,7 +408,7 @@ export default function App(): React.JSX.Element {
 
 function Overlay({ children }: { children: React.ReactNode }): React.JSX.Element {
   return (
-    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-ink/90 backdrop-blur-md">
+    <div className="absolute inset-0 z-30 flex flex-col items-center justify-center gap-6 bg-ink/95">
       {children}
     </div>
   )

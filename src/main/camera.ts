@@ -1,50 +1,86 @@
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process'
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
 import { EventEmitter } from 'node:events'
 import { readFile, writeFile } from 'node:fs/promises'
 import sharp from 'sharp'
 import type { CameraStatus } from '@shared/types'
-
-const execFileAsync = promisify(execFile)
-
-const JPEG_SOI = Buffer.from([0xff, 0xd8])
-const JPEG_EOI = Buffer.from([0xff, 0xd9])
+import { createLogger } from './util/logger'
+import { JpegFrameSplitter } from './util/jpeg'
+import { runCommand, CommandError } from './util/exec'
+import { retry } from './util/async'
 
 type FrameListener = (frame: Buffer) => void
 
+const FRAME_TIMEOUT_MS = 6000 // keine Frames so lange → Liveview neu starten
+const RESTART_BASE_MS = 500
+const RESTART_MAX_MS = 8000
+const CAPTURE_TIMEOUT_MS = 30_000
+const DETECT_TIMEOUT_MS = 8000
+const WATCHDOG_INTERVAL_MS = 2000
+
 /**
- * Kapselt den Zugriff auf die Canon-Kamera über die gphoto2-CLI.
+ * Robuste Kapselung des Kamera-Zugriffs über die gphoto2-CLI.
  *
- * - Liveview: `gphoto2 --capture-movie --stdout` liefert einen MJPEG-Strom,
- *   der hier in einzelne JPEG-Frames zerlegt und an Abonnenten verteilt wird.
- * - Aufnahme: `gphoto2 --capture-image-and-download`.
- *
- * Ist keine Kamera/gphoto2 vorhanden, läuft ein Mock-Modus mit generierten
- * Bildern, damit sich die Oberfläche auch ohne Hardware entwickeln lässt.
+ * Selbstheilend: stürzt der Liveview-Prozess ab oder bleiben Frames aus, wird er
+ * mit Backoff neu gestartet; eine Aufnahme läuft mit Timeout und Retries; ist die
+ * Kamera weg, wird beim nächsten Start neu erkannt. Ohne gphoto2/Kamera läuft ein
+ * Mock-Modus für die UI-Entwicklung.
  */
 export class CameraManager extends EventEmitter {
+  private readonly log = createLogger('camera')
+  private readonly splitter = new JpegFrameSplitter()
+
   private available = false
+  private gphoto2Missing = false
   private status: CameraStatus = 'idle'
-  private movieProc: ChildProcessWithoutNullStreams | null = null
-  private buffer = Buffer.alloc(0)
   private latestFrame: Buffer | null = null
-  private frameListeners = new Set<FrameListener>()
+  private lastFrameAt = 0
+  private readonly frameListeners = new Set<FrameListener>()
+
+  private movieProc: ChildProcessWithoutNullStreams | null = null
   private mockTimer: NodeJS.Timeout | null = null
   private mockTick = 0
 
+  private wantLive = false
+  private capturing = false
+  private restartTimer: NodeJS.Timeout | null = null
+  private restartAttempts = 0
+  private readonly watchdog: NodeJS.Timeout
+  private disposed = false
+
+  constructor() {
+    super()
+    this.watchdog = setInterval(() => this.checkWatchdog(), WATCHDOG_INTERVAL_MS)
+  }
+
+  /** Prüft, ob gphoto2 vorhanden ist und eine Kamera erkannt wird. */
   async detect(): Promise<boolean> {
     try {
-      await execFileAsync('gphoto2', ['--version'])
-      // Kamera angeschlossen?
-      const { stdout } = await execFileAsync('gphoto2', ['--auto-detect'])
-      // Erste Zeile ist die Kopfzeile, ab Zeile 3 stehen erkannte Kameras.
-      this.available = stdout.split('\n').slice(2).some((l) => l.trim().length > 0)
-    } catch {
+      await runCommand('gphoto2', ['--version'], { timeoutMs: DETECT_TIMEOUT_MS })
+      this.gphoto2Missing = false
+      const { stdout } = await runCommand('gphoto2', ['--auto-detect'], {
+        timeoutMs: DETECT_TIMEOUT_MS
+      })
+      this.available = stdout
+        .split('\n')
+        .slice(2)
+        .some((l) => l.trim().length > 0)
+    } catch (err) {
       this.available = false
+      if (err instanceof Error && 'code' in err && err.code === 'ENOENT') {
+        this.gphoto2Missing = true
+        this.log.info('gphoto2 nicht installiert – Mock-Modus aktiv')
+      } else if (!(err instanceof CommandError)) {
+        // CommandError (z. B. keine Kamera angeschlossen) ist normal → still.
+        this.log.warn('gphoto2-Erkennung fehlgeschlagen', err)
+      }
     }
-    this.setStatus(this.available ? 'idle' : 'no-camera')
+    if (!this.available && this.status !== 'capturing') this.setStatus('no-camera')
     return this.available
+  }
+
+  /** True, wenn das gphoto2-Binary nicht gefunden wurde (ENOENT). */
+  isGphoto2Missing(): boolean {
+    return this.gphoto2Missing
   }
 
   isAvailable(): boolean {
@@ -64,90 +100,194 @@ export class CameraManager extends EventEmitter {
     return () => this.frameListeners.delete(cb)
   }
 
-  startLiveview(): void {
+  /** Startet den Liveview on-demand. Erkennt die Kamera bei Bedarf neu. */
+  async startLiveview(): Promise<void> {
+    this.wantLive = true
     if (this.movieProc || this.mockTimer) return
-    if (this.available) {
-      this.startRealLiveview()
-    } else {
-      this.startMockLiveview()
-    }
-    this.setStatus('live')
+    if (!this.available) await this.detect()
+    this.spawnLiveview()
   }
 
+  /** Stoppt den Liveview und alle Neustart-Versuche. */
   stopLiveview(): void {
-    if (this.movieProc) {
-      this.movieProc.kill('SIGTERM')
-      this.movieProc = null
+    this.wantLive = false
+    this.clearRestart()
+    this.stopMovieProcess()
+    this.stopMock()
+    if (this.status === 'live' || this.status === 'reconnecting') {
+      this.setStatus(this.available ? 'idle' : 'no-camera')
     }
-    if (this.mockTimer) {
-      clearInterval(this.mockTimer)
-      this.mockTimer = null
-    }
-    this.buffer = Buffer.alloc(0)
-    if (this.status === 'live') this.setStatus('idle')
   }
 
   /**
-   * Nimmt ein Foto auf und gibt den JPEG-Buffer in voller Auflösung zurück.
-   * Stoppt vorher den Liveview (Kamera erlaubt nur einen Zugriff).
+   * Nimmt ein Foto auf (Timeout + Retries) und gibt den JPEG-Buffer zurück.
+   * Stoppt vorher den Liveview, da die Kamera nur einen Zugriff erlaubt.
    */
   async capture(destPath: string): Promise<Buffer> {
-    this.stopLiveview()
+    if (this.capturing) throw new Error('Aufnahme läuft bereits')
+    this.capturing = true
+    this.clearRestart()
+    this.stopMovieProcess()
     this.setStatus('capturing')
     try {
       if (this.available) {
-        await execFileAsync('gphoto2', [
-          '--capture-image-and-download',
-          '--filename',
-          destPath,
-          '--force-overwrite'
-        ])
-        return await readFile(destPath)
+        return await retry(
+          async () => {
+            await runCommand(
+              'gphoto2',
+              ['--capture-image-and-download', '--filename', destPath, '--force-overwrite'],
+              { timeoutMs: CAPTURE_TIMEOUT_MS }
+            )
+            const data = await readFile(destPath)
+            if (data.length === 0) throw new Error('Aufnahme leer')
+            return data
+          },
+          {
+            attempts: 3,
+            delayMs: 600,
+            onRetry: (err, attempt, next) =>
+              this.log.warn(`Aufnahme-Versuch ${attempt} fehlgeschlagen, Retry in ${next}ms`, err)
+          }
+        )
       }
       const mock = await this.renderMockPhoto()
       await writeFile(destPath, mock)
       return mock
+    } catch (err) {
+      this.log.error('Aufnahme endgültig fehlgeschlagen', err)
+      // Kamera könnte abgezogen/aus sein – beim nächsten Start neu erkennen.
+      this.available = false
+      throw err
     } finally {
-      this.setStatus('idle')
+      this.capturing = false
     }
   }
 
+  /** Räumt alles auf (beim Beenden). */
+  dispose(): void {
+    this.disposed = true
+    this.wantLive = false
+    clearInterval(this.watchdog)
+    this.clearRestart()
+    this.stopMovieProcess()
+    this.stopMock()
+    this.frameListeners.clear()
+  }
+
+  // ---- intern -------------------------------------------------------------
+
+  private spawnLiveview(): void {
+    if (this.disposed) return
+    if (this.available) this.startRealLiveview()
+    else this.startMockLiveview()
+    this.setStatus('live')
+  }
+
   private startRealLiveview(): void {
-    const proc = spawn('gphoto2', ['--capture-movie', '--stdout'])
+    this.splitter.reset()
+    let proc: ChildProcessWithoutNullStreams
+    try {
+      proc = spawn('gphoto2', ['--capture-movie', '--stdout'])
+    } catch (err) {
+      this.log.error('Liveview konnte nicht gestartet werden', err)
+      this.scheduleRestart()
+      return
+    }
     this.movieProc = proc
-    proc.stdout.on('data', (chunk: Buffer) => this.ingest(chunk))
-    proc.on('error', (err) => this.fail(err.message))
-    proc.on('exit', () => {
+    proc.stdout.on('data', (chunk: Buffer) => {
+      for (const frame of this.splitter.push(chunk)) this.emitFrame(frame)
+    })
+    proc.on('error', (err) => {
+      this.log.error('Liveview-Prozessfehler', err)
       if (this.movieProc === proc) this.movieProc = null
+      if (this.wantLive && !this.capturing) this.scheduleRestart()
+    })
+    proc.on('exit', (code, signal) => {
+      if (this.movieProc === proc) this.movieProc = null
+      if (this.disposed || this.capturing || !this.wantLive) return
+      this.log.warn(`Liveview beendet (code=${code} signal=${signal}) – Neustart`)
+      this.scheduleRestart()
     })
   }
 
-  /** Zerlegt den MJPEG-Strom in einzelne JPEG-Frames. */
-  private ingest(chunk: Buffer): void {
-    this.buffer = Buffer.concat([this.buffer, chunk])
-    for (;;) {
-      const start = this.buffer.indexOf(JPEG_SOI)
-      if (start < 0) break
-      const end = this.buffer.indexOf(JPEG_EOI, start + 2)
-      if (end < 0) {
-        if (start > 0) this.buffer = this.buffer.subarray(start)
-        break
+  private stopMovieProcess(): void {
+    if (this.movieProc) {
+      const proc = this.movieProc
+      this.movieProc = null
+      try {
+        proc.kill('SIGTERM')
+        setTimeout(() => {
+          if (!proc.killed) proc.kill('SIGKILL')
+        }, 1500).unref?.()
+      } catch (err) {
+        this.log.warn('Liveview-Prozess konnte nicht beendet werden', err)
       }
-      const frame = this.buffer.subarray(start, end + 2)
-      this.buffer = this.buffer.subarray(end + 2)
-      this.emitFrame(frame)
+    }
+    this.splitter.reset()
+  }
+
+  private scheduleRestart(): void {
+    if (this.restartTimer || !this.wantLive || this.disposed) return
+    this.restartAttempts++
+    const delay = Math.min(RESTART_MAX_MS, RESTART_BASE_MS * 2 ** (this.restartAttempts - 1))
+    this.setStatus(this.available ? 'reconnecting' : 'no-camera')
+    this.restartTimer = setTimeout(() => {
+      this.restartTimer = null
+      if (!this.wantLive || this.capturing || this.disposed) return
+      void this.detect()
+        .catch(() => {})
+        .then(() => {
+          if (this.wantLive && !this.capturing && !this.movieProc && !this.mockTimer) {
+            this.spawnLiveview()
+          }
+        })
+    }, delay)
+  }
+
+  private clearRestart(): void {
+    if (this.restartTimer) {
+      clearTimeout(this.restartTimer)
+      this.restartTimer = null
+    }
+    this.restartAttempts = 0
+  }
+
+  private checkWatchdog(): void {
+    if (!this.wantLive || this.capturing || this.disposed) return
+    if (!this.available || !this.movieProc) return
+    if (this.lastFrameAt && Date.now() - this.lastFrameAt > FRAME_TIMEOUT_MS) {
+      this.log.warn('Keine Frames – Watchdog startet Liveview neu')
+      this.stopMovieProcess()
+      this.scheduleRestart()
     }
   }
 
   private emitFrame(frame: Buffer): void {
     this.latestFrame = frame
-    for (const cb of this.frameListeners) cb(frame)
+    this.lastFrameAt = Date.now()
+    this.restartAttempts = 0 // laufende Frames → Backoff zurücksetzen
+    for (const cb of this.frameListeners) {
+      try {
+        cb(frame)
+      } catch (err) {
+        this.log.warn('Frame-Listener-Fehler', err)
+      }
+    }
   }
 
   private startMockLiveview(): void {
     this.mockTimer = setInterval(() => {
-      void this.renderMockFrame().then((f) => this.emitFrame(f))
+      void this.renderMockFrame()
+        .then((f) => this.emitFrame(f))
+        .catch((err) => this.log.warn('Mock-Frame-Fehler', err))
     }, 100)
+  }
+
+  private stopMock(): void {
+    if (this.mockTimer) {
+      clearInterval(this.mockTimer)
+      this.mockTimer = null
+    }
   }
 
   private async renderMockFrame(): Promise<Buffer> {
@@ -174,10 +314,5 @@ export class CameraManager extends EventEmitter {
     if (this.status === status) return
     this.status = status
     this.emit('status', status)
-  }
-
-  private fail(message: string): void {
-    console.error('[camera]', message)
-    this.setStatus('error')
   }
 }

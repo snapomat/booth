@@ -53,7 +53,29 @@ export const defaultSettings: Settings = {
 }
 
 /** Zustand der Kamera-Anbindung. */
-export type CameraStatus = 'idle' | 'live' | 'capturing' | 'no-camera' | 'error'
+export type CameraStatus =
+  | 'idle'
+  | 'live'
+  | 'capturing'
+  | 'reconnecting'
+  | 'no-camera'
+  | 'error'
+
+/** Diagnose-Infos zur Kamera-Anbindung (für den Admin-Bereich). */
+export interface CameraDiagnostics {
+  /** gphoto2-Binary nicht gefunden (muss installiert werden). */
+  gphoto2Missing: boolean
+  /** Aktuell eine Kamera erkannt. */
+  cameraDetected: boolean
+  /** Plattform (linux/darwin/win32). */
+  platform: string
+}
+
+/** Ergebnis der gphoto2-Installation. */
+export interface InstallResult {
+  ok: boolean
+  message: string
+}
 
 /** Ein mitgelieferter Standard-Hintergrund. */
 export interface DefaultBackground {
@@ -66,8 +88,10 @@ export interface DefaultBackground {
 /** Ergebnis einer Aufnahme. */
 export interface CaptureResult {
   id: string
-  /** Daten-URL des fertig komponierten Bildes (für die Vorschau im Renderer). */
+  /** Daten-URL des fertig komponierten Bildes in voller Auflösung (großes Vorschaubild). */
   dataUrl: string
+  /** Kleines Thumbnail (für die Collage der letzten Fotos – spart Dekodier-Last). */
+  thumbUrl: string
 }
 
 /** Typisierter API-Vertrag, der via Preload an den Renderer gereicht wird. */
@@ -82,6 +106,10 @@ export interface PhotoboothApi {
   readImageDataUrl(path: string): Promise<string | null>
   /** Liefert die mitgelieferten Standard-Hintergründe (Dateiname + Data-URL). */
   getDefaultBackgrounds(): Promise<DefaultBackground[]>
+  /** Diagnose: gphoto2 installiert? Kamera erkannt? */
+  getCameraDiagnostics(): Promise<CameraDiagnostics>
+  /** Versucht (unter Linux, via pkexec/apt) gphoto2 zu installieren. */
+  installGphoto2(): Promise<InstallResult>
   /** Konkret aufgelöste Kamera-Quelle (löst `auto` auf). */
   resolveCameraSource(): Promise<ResolvedCameraSource>
   /** Basis-URL des lokalen MJPEG-Liveview-Streams (für gphoto2/mock). */
