@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "description": "Eigene Photobooth-Software für Canon EOS (gphoto2) mit Sofortdruck",
   "main": "./out/main/index.js",
-  "author": "",
+  "author": "Snapomat <mail@hueske.digital>",
   "license": "MIT",
   "scripts": {
     "dev": "electron-vite dev",
