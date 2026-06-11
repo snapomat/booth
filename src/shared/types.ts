@@ -102,6 +102,8 @@ export interface DefaultBackground {
 export interface EventInfo {
   id: string
   name: string
+  /** Ordner-/URL-tauglicher Slug; Name des Foto-Ordners und Galerie-folderPath. */
+  dir: string
   /** ISO-Zeitstempel der Anlage. */
   createdAt: string
 }

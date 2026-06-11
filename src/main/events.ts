@@ -5,7 +5,7 @@ import { randomUUID } from 'node:crypto'
 import type { EventInfo, EventsState } from '@shared/types'
 import { getDataDir, getPhotosDir, writeAtomic } from './config'
 import { createLogger } from './util/logger'
-import { normalizeEventName } from './util/event-name'
+import { normalizeEventName, slugifyEventName } from './util/event-name'
 
 const log = createLogger('events')
 
@@ -47,22 +47,59 @@ async function load(): Promise<EventStore> {
   } catch {
     store = { events: [], activeId: null }
   }
+  // Slug-Migration: Events ohne `dir` bekommen einen eindeutigen Slug, und der
+  // bestehende UUID-Ordner wird auf den lesbaren Namen umbenannt.
+  let dirty = false
+  const taken = new Set<string>()
+  for (const e of store.events) {
+    if (!e.dir) {
+      e.dir = uniqueDir(slugifyEventName(e.name), taken)
+      dirty = true
+      const oldDir = join(getPhotosDir(), e.id)
+      const newDir = join(getPhotosDir(), e.dir)
+      if (existsSync(oldDir) && !existsSync(newDir)) {
+        try {
+          await rename(oldDir, newDir)
+          log.info(`Event-Ordner ${e.id} → ${e.dir} migriert`)
+        } catch (err) {
+          log.warn('Ordner-Migration fehlgeschlagen', err)
+        }
+      }
+    }
+    taken.add(e.dir)
+  }
+
   // Immer ein aktives Event sicherstellen, damit Aufnahmen einen Ordner haben.
   if (!store.events.some((e) => e.id === store!.activeId)) {
     if (store.events.length > 0) {
       store.activeId = store.events[0].id
     } else {
-      const seeded = makeEvent('Standard')
+      const seeded = makeEvent('Standard', taken)
       store.events.push(seeded)
       store.activeId = seeded.id
-      await persist()
     }
+    dirty = true
   }
+  if (dirty) await persist()
   return store
 }
 
-function makeEvent(name: string): EventInfo {
-  return { id: randomUUID(), name, createdAt: new Date().toISOString() }
+/** Hängt -2, -3 … an, bis der Slug eindeutig ist. */
+function uniqueDir(base: string, taken: Set<string>): string {
+  if (!taken.has(base)) return base
+  for (let i = 2; ; i++) {
+    const candidate = `${base}-${i}`
+    if (!taken.has(candidate)) return candidate
+  }
+}
+
+function makeEvent(name: string, taken: Set<string>): EventInfo {
+  return {
+    id: randomUUID(),
+    name,
+    dir: uniqueDir(slugifyEventName(name), taken),
+    createdAt: new Date().toISOString()
+  }
 }
 
 async function persist(): Promise<void> {
@@ -85,7 +122,7 @@ export async function getActiveEvent(): Promise<EventInfo> {
 /** Foto-Ordner des aktiven Events (wird bei Bedarf angelegt). */
 export async function getActiveEventDir(): Promise<string> {
   const active = await getActiveEvent()
-  const dir = join(getPhotosDir(), active.id)
+  const dir = join(getPhotosDir(), active.dir)
   mkdirSync(dir, { recursive: true })
   return dir
 }
@@ -93,7 +130,7 @@ export async function getActiveEventDir(): Promise<string> {
 /** Legt ein Event an und macht es aktiv. */
 export async function createEvent(rawName: string): Promise<EventInfo> {
   const s = await load()
-  const ev = makeEvent(normalizeEventName(rawName))
+  const ev = makeEvent(normalizeEventName(rawName), new Set(s.events.map((e) => e.dir)))
   s.events.push(ev)
   s.activeId = ev.id
   await persist()
@@ -112,12 +149,13 @@ export async function setActiveEvent(id: string): Promise<void> {
 export async function deleteEvent(id: string): Promise<void> {
   const s = await load()
   if (s.events.length <= 1) throw new Error('Das letzte Event kann nicht gelöscht werden.')
-  if (!s.events.some((e) => e.id === id)) return
+  const ev = s.events.find((e) => e.id === id)
+  if (!ev) return
   s.events = s.events.filter((e) => e.id !== id)
   if (s.activeId === id) s.activeId = s.events[0]?.id ?? null
   await persist()
   // Fotos des Events entfernen (best effort).
-  await rm(join(getPhotosDir(), id), { recursive: true, force: true }).catch((err) =>
-    log.warn(`Event-Ordner ${id} konnte nicht gelöscht werden`, err)
+  await rm(join(getPhotosDir(), ev.dir), { recursive: true, force: true }).catch((err) =>
+    log.warn(`Event-Ordner ${ev.dir} konnte nicht gelöscht werden`, err)
   )
 }
