@@ -498,6 +498,27 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                       </label>
                       {form.aiEnabled && (
                         <>
+                          <div className="grid grid-cols-[1fr_auto] gap-3">
+                            <Field label="OpenAI-API-Key">
+                              <input
+                                type="password"
+                                autoComplete="off"
+                                spellCheck={false}
+                                placeholder="sk-…"
+                                value={form.aiApiKey}
+                                onChange={(e) => patch({ aiApiKey: e.target.value })}
+                                className={inputCls}
+                              />
+                            </Field>
+                            <Field label="Modell">
+                              <input
+                                value={form.aiModel}
+                                onChange={(e) => patch({ aiModel: e.target.value })}
+                                spellCheck={false}
+                                className={`${inputCls} w-44`}
+                              />
+                            </Field>
+                          </div>
                           <Field label="Stil-Prompt">
                             <textarea
                               rows={3}
@@ -508,8 +529,8 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                             />
                           </Field>
                           <span className="font-mono text-[0.6rem] tracking-wide text-cream-dim/70">
-                            API-Key über Umgebungsvariable <b>OPENAI_API_KEY</b> setzen (nicht in der App
-                            gespeichert). Fotos werden zur Verarbeitung an OpenAI gesendet.
+                            Key wird lokal gespeichert (nicht auf dem Desktop). Leer lassen = Fallback auf
+                            <b> OPENAI_API_KEY</b>. Fotos werden zur Verarbeitung an OpenAI gesendet.
                           </span>
                         </>
                       )}

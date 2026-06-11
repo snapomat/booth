@@ -4,9 +4,8 @@ import { createLogger } from './util/logger'
 
 const log = createLogger('ai-portraits')
 
-// OpenAI Bild-Bearbeitung (gpt-image-1): Foto + Stil-Prompt → stilisierte Variante.
+// OpenAI Bild-Bearbeitung (z. B. gpt-image-1): Foto + Stil-Prompt → Variante.
 const API_URL = 'https://api.openai.com/v1/images/edits'
-const MODEL = 'gpt-image-1'
 // Landschaft 3:2-nah – passt zum späteren Druckformat (composePrint deckt auf 1800×1200).
 const SIZE = '1536x1024'
 const AI_TIMEOUT_MS = 90_000
@@ -15,24 +14,30 @@ const responseSchema = z.object({
   data: z.array(z.object({ b64_json: z.string() })).min(1)
 })
 
-/** True, wenn ein API-Key hinterlegt ist (Key kommt aus der Umgebung, nie aus Settings). */
-export function isAiConfigured(): boolean {
-  return !!process.env['OPENAI_API_KEY']
+export interface StylizeOptions {
+  apiKey: string
+  model: string
+  prompt: string
+}
+
+/** Effektiver API-Key: erst aus den Settings, sonst aus der Umgebung (Dev). */
+export function resolveApiKey(settingsKey: string): string {
+  return settingsKey.trim() || process.env['OPENAI_API_KEY'] || ''
 }
 
 /**
- * Stilisiert ein Foto über die OpenAI-Bild-API und liefert den JPEG/PNG-Buffer
- * der Variante. Mit Timeout + einem Retry; wirft mit klarer Meldung bei Fehlern.
+ * Stilisiert ein Foto über die OpenAI-Bild-API und liefert den Bild-Buffer der
+ * Variante. Mit Timeout + einem Retry; wirft mit klarer Meldung bei Fehlern.
  */
-export async function stylizePhoto(original: Buffer, prompt: string): Promise<Buffer> {
-  const apiKey = process.env['OPENAI_API_KEY']
-  if (!apiKey) throw new Error('OPENAI_API_KEY ist nicht gesetzt.')
+export async function stylizePhoto(original: Buffer, opts: StylizeOptions): Promise<Buffer> {
+  const { apiKey, model, prompt } = opts
+  if (!apiKey) throw new Error('Kein OpenAI-API-Key hinterlegt.')
   if (!prompt.trim()) throw new Error('Kein AI-Stil-Prompt konfiguriert.')
 
   return retry(
     async () => {
       const form = new FormData()
-      form.append('model', MODEL)
+      form.append('model', model)
       form.append('image', new Blob([new Uint8Array(original)], { type: 'image/jpeg' }), 'photo.jpg')
       form.append('prompt', prompt)
       form.append('size', SIZE)

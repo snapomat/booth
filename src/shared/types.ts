@@ -35,10 +35,14 @@ export const settingsSchema = z.object({
   backgroundOpacity: z.number().min(0).max(1),
   /** Akzentfarbe (Buttons, Countdown-Ring etc.) als Hex. */
   accentColor: z.string(),
-  /** AI-Portraits anbieten (benötigt OPENAI_API_KEY in der Umgebung). */
+  /** AI-Portraits anbieten (benötigt einen OpenAI-API-Key). */
   aiEnabled: z.boolean(),
   /** Stil-Anweisung für die AI-Variante. */
-  aiPrompt: z.string()
+  aiPrompt: z.string(),
+  /** OpenAI-API-Key (lokal gespeichert; leer = Fallback auf OPENAI_API_KEY-Env). */
+  aiApiKey: z.string(),
+  /** OpenAI-Bildmodell (z. B. gpt-image-1). */
+  aiModel: z.string()
 })
 
 export type Settings = z.infer<typeof settingsSchema>
@@ -56,7 +60,9 @@ export const defaultSettings: Settings = {
   accentColor: '#e8a23c',
   aiEnabled: false,
   aiPrompt:
-    'Verwandle dieses Foto in ein hochwertiges, künstlerisches Studio-Portrait. Bewahre Gesicht, Identität und Pose der Person exakt.'
+    'Verwandle dieses Foto in ein hochwertiges, künstlerisches Studio-Portrait. Bewahre Gesicht, Identität und Pose der Person exakt.',
+  aiApiKey: '',
+  aiModel: 'gpt-image-1'
 }
 
 /** Zustand der Kamera-Anbindung. */
