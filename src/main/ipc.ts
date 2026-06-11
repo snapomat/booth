@@ -250,4 +250,7 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
       throw err
     }
   })
+
+  // Startup-Marker: erscheint dieser im Terminal, läuft der aktuelle Main-Stand (inkl. AI-Handler).
+  log.info('IPC-Handler registriert (inkl. AI)')
 }
