@@ -27,6 +27,8 @@ export class LiveviewServer {
       res.writeHead(200, {
         'Content-Type': `multipart/x-mixed-replace; boundary=${boundary}`,
         'Cache-Control': 'no-cache, no-store',
+        // Erlaubt dem Renderer, Frames auf ein Canvas zu zeichnen (Fokus-Analyse).
+        'Access-Control-Allow-Origin': '*',
         Connection: 'close',
         Pragma: 'no-cache'
       })

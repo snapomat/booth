@@ -9,6 +9,7 @@ import type {
 } from '@shared/types'
 import { defaultSettings } from '@shared/types'
 import OnScreenKeyboard from './OnScreenKeyboard'
+import FocusAssist from './FocusAssist'
 
 interface Props {
   settings: Settings | null
@@ -41,6 +42,7 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
   const [newEventName, setNewEventName] = useState('')
   const [pinForm, setPinForm] = useState({ old: '', next: '', confirm: '' })
   const [pinMsg, setPinMsg] = useState<string | null>(null)
+  const [focusOpen, setFocusOpen] = useState(false)
 
   const setTab = (t: Tab): void => {
     setTabState(t)
@@ -468,6 +470,12 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                         ))}
                       </select>
                     </Field>
+                    <button
+                      onClick={() => setFocusOpen(true)}
+                      className="self-start rounded-lg bg-cream/10 px-4 py-2.5 font-mono text-xs tracking-wide text-cream uppercase transition hover:bg-cream/20"
+                    >
+                      Fokus prüfen
+                    </button>
                     <Field label="Drucker (CUPS)">
                       <select
                         value={form.printerName ?? ''}
@@ -580,6 +588,7 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
             ) : null
           })()}
       </div>
+      {focusOpen && <FocusAssist onClose={() => setFocusOpen(false)} />}
     </div>
   )
 }
