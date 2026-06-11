@@ -46,7 +46,7 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     void window.api.getSettings().then(setSettings)
     void window.api.getDefaultBackgrounds().then(setDefaults)
-    void window.api.aiStatus().then(setAiEnabled)
+    void window.api.aiStatus().then(setAiEnabled).catch(() => setAiEnabled(false))
   }, [])
 
   // Eigenes Hintergrundbild laden (null = Standard-Slideshow).
