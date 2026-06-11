@@ -178,6 +178,9 @@ export class CameraManager extends EventEmitter {
 
   private spawnLiveview(): void {
     if (this.disposed) return
+    // Frischer Start: Frame-Uhr zurücksetzen, sonst feuert der Watchdog mit einem
+    // alten Timestamp und killt den eben gestarteten Prozess sofort wieder.
+    this.lastFrameAt = Date.now()
     if (this.available) this.startRealLiveview()
     else this.startMockLiveview()
     this.setStatus('live')

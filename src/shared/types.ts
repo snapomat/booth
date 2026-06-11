@@ -85,6 +85,20 @@ export interface DefaultBackground {
   accent: string
 }
 
+/** Ein Event (Veranstaltung) – gruppiert Aufnahmen in einem eigenen Ordner. */
+export interface EventInfo {
+  id: string
+  name: string
+  /** ISO-Zeitstempel der Anlage. */
+  createdAt: string
+}
+
+/** Event-Liste samt aktuell aktivem Event. */
+export interface EventsState {
+  events: EventInfo[]
+  activeId: string | null
+}
+
 /** Ergebnis einer Aufnahme. */
 export interface CaptureResult {
   id: string
@@ -99,6 +113,16 @@ export interface PhotoboothApi {
   getSettings(): Promise<Settings>
   saveSettings(partial: Partial<Settings>, adminPassword: string): Promise<Settings>
   verifyAdminPassword(password: string): Promise<boolean>
+  /** Ändert den Admin-PIN (alter PIN nötig). Wirft bei falschem/gesperrtem PIN. */
+  changeAdminPassword(oldPin: string, newPin: string): Promise<void>
+  /** Events (neueste zuerst) + aktives Event. Das erste Event wird on-demand angelegt. */
+  listEvents(): Promise<EventsState>
+  /** Legt ein Event an und macht es aktiv. */
+  createEvent(name: string): Promise<EventInfo>
+  /** Setzt das aktive Event (neue Aufnahmen landen in dessen Ordner). */
+  setActiveEvent(id: string): Promise<void>
+  /** Löscht ein Event inkl. Fotos (das letzte Event bleibt erhalten). */
+  deleteEvent(id: string): Promise<void>
   listPrinters(): Promise<string[]>
   /** Öffnet einen nativen Datei-Dialog zur Bildauswahl, liefert den Pfad (oder null). */
   pickImageFile(): Promise<string | null>

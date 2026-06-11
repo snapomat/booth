@@ -1,6 +1,12 @@
 import type React from 'react'
 import { useEffect, useState } from 'react'
-import type { CameraDiagnostics, CameraSource, DefaultBackground, Settings } from '@shared/types'
+import type {
+  CameraDiagnostics,
+  CameraSource,
+  DefaultBackground,
+  EventInfo,
+  Settings
+} from '@shared/types'
 import OnScreenKeyboard from './OnScreenKeyboard'
 
 interface Props {
@@ -9,7 +15,9 @@ interface Props {
   onSaved: (settings: Settings) => void
 }
 
-type Tab = 'allgemein' | 'hintergrund' | 'kamera'
+type Tab = 'allgemein' | 'events' | 'hintergrund' | 'kamera'
+/** Welches Textfeld die On-Screen-Tastatur gerade bedient. */
+type KbField = 'welcomeText' | 'newEvent' | 'pinOld' | 'pinNext' | 'pinConfirm'
 
 const sources: CameraSource[] = ['auto', 'gphoto2', 'webcam', 'mock']
 const inputCls =
@@ -25,12 +33,35 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
   const [diag, setDiag] = useState<CameraDiagnostics | null>(null)
   const [installing, setInstalling] = useState(false)
   const [tab, setTabState] = useState<Tab>('allgemein')
-  const [kbOpen, setKbOpen] = useState(false)
+  const [kbField, setKbField] = useState<KbField | null>(null)
   const [form, setForm] = useState<Settings | null>(settings)
+  const [events, setEvents] = useState<EventInfo[]>([])
+  const [activeEventId, setActiveEventId] = useState<string | null>(null)
+  const [newEventName, setNewEventName] = useState('')
+  const [pinForm, setPinForm] = useState({ old: '', next: '', confirm: '' })
+  const [pinMsg, setPinMsg] = useState<string | null>(null)
 
   const setTab = (t: Tab): void => {
     setTabState(t)
-    setKbOpen(false)
+    setKbField(null)
+  }
+
+  // Bindet die On-Screen-Tastatur an das aktuell fokussierte Textfeld.
+  const kbBinding = (): { value: string; onChange: (v: string) => void } | null => {
+    switch (kbField) {
+      case 'welcomeText':
+        return form ? { value: form.welcomeText, onChange: (v) => patch({ welcomeText: v }) } : null
+      case 'newEvent':
+        return { value: newEventName, onChange: setNewEventName }
+      case 'pinOld':
+        return { value: pinForm.old, onChange: (v) => setPinForm((p) => ({ ...p, old: v })) }
+      case 'pinNext':
+        return { value: pinForm.next, onChange: (v) => setPinForm((p) => ({ ...p, next: v })) }
+      case 'pinConfirm':
+        return { value: pinForm.confirm, onChange: (v) => setPinForm((p) => ({ ...p, confirm: v })) }
+      default:
+        return null
+    }
   }
 
   // ESC schließt den Admin-Bereich.
@@ -42,6 +73,12 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  async function refreshEvents(): Promise<void> {
+    const state = await window.api.listEvents()
+    setEvents(state.events)
+    setActiveEventId(state.activeId)
+  }
+
   async function submitPin(pin: string): Promise<void> {
     if (await window.api.verifyAdminPassword(pin)) {
       setUnlocked(true)
@@ -49,9 +86,51 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
       setPrinters(await window.api.listPrinters())
       setDefaults(await window.api.getDefaultBackgrounds())
       setDiag(await window.api.getCameraDiagnostics())
+      await refreshEvents()
     } else {
       setError('Falsche PIN')
       setPassword('')
+    }
+  }
+
+  async function addEvent(): Promise<void> {
+    setError(null)
+    try {
+      await window.api.createEvent(newEventName)
+      setNewEventName('')
+      await refreshEvents()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Event konnte nicht angelegt werden')
+    }
+  }
+
+  async function activateEvent(id: string): Promise<void> {
+    await window.api.setActiveEvent(id)
+    await refreshEvents()
+  }
+
+  async function removeEvent(id: string): Promise<void> {
+    setError(null)
+    try {
+      await window.api.deleteEvent(id)
+      await refreshEvents()
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Event konnte nicht gelöscht werden')
+    }
+  }
+
+  async function changePin(): Promise<void> {
+    setPinMsg(null)
+    if (pinForm.next !== pinForm.confirm) {
+      setPinMsg('Neue PIN stimmt nicht überein.')
+      return
+    }
+    try {
+      await window.api.changeAdminPassword(pinForm.old, pinForm.next)
+      setPinForm({ old: '', next: '', confirm: '' })
+      setPinMsg('PIN geändert.')
+    } catch (err) {
+      setPinMsg(err instanceof Error ? err.message : 'PIN-Änderung fehlgeschlagen')
     }
   }
 
@@ -124,7 +203,6 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                 <PinKey onClick={() => pressDigit('0')}>0</PinKey>
                 <PinKey onClick={() => setPassword((p) => p.slice(0, -1))}>⌫</PinKey>
               </div>
-              <p className="font-mono text-[0.65rem] tracking-wide text-cream-dim/60">Standard-PIN: 1234</p>
             </div>
           ) : form ? (
             <div className="flex flex-col gap-5">
@@ -132,6 +210,9 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
               <div className="flex gap-2">
                 <TabButton active={tab === 'allgemein'} onClick={() => setTab('allgemein')}>
                   Allgemein
+                </TabButton>
+                <TabButton active={tab === 'events'} onClick={() => setTab('events')}>
+                  Events
                 </TabButton>
                 <TabButton active={tab === 'hintergrund'} onClick={() => setTab('hintergrund')}>
                   Hintergrund
@@ -149,7 +230,7 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                       <input
                         value={form.welcomeText}
                         onChange={(e) => patch({ welcomeText: e.target.value })}
-                        onFocus={() => setKbOpen(true)}
+                        onFocus={() => setKbField('welcomeText')}
                         className={inputCls}
                       />
                     </Field>
@@ -185,6 +266,106 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                         />
                       </Field>
                     </div>
+
+                    <div className="mt-2 flex flex-col gap-3 rounded-xl bg-ink/40 p-4 ring-1 ring-cream/10">
+                      <Label>Admin-PIN ändern</Label>
+                      <div className="grid grid-cols-3 gap-3">
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          placeholder="Alte PIN"
+                          value={pinForm.old}
+                          onChange={(e) => setPinForm((p) => ({ ...p, old: e.target.value }))}
+                          onFocus={() => setKbField('pinOld')}
+                          className={inputCls}
+                        />
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          placeholder="Neue PIN"
+                          value={pinForm.next}
+                          onChange={(e) => setPinForm((p) => ({ ...p, next: e.target.value }))}
+                          onFocus={() => setKbField('pinNext')}
+                          className={inputCls}
+                        />
+                        <input
+                          type="password"
+                          inputMode="numeric"
+                          placeholder="Neue PIN wdh."
+                          value={pinForm.confirm}
+                          onChange={(e) => setPinForm((p) => ({ ...p, confirm: e.target.value }))}
+                          onFocus={() => setKbField('pinConfirm')}
+                          className={inputCls}
+                        />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <button
+                          onClick={changePin}
+                          className="self-start rounded-lg bg-cream/10 px-4 py-2 font-mono text-xs tracking-wide text-cream uppercase transition hover:bg-cream/20"
+                        >
+                          PIN ändern
+                        </button>
+                        {pinMsg && <span className="font-mono text-xs text-flare">{pinMsg}</span>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {tab === 'events' && (
+                  <div className="flex flex-col gap-4">
+                    <div className="flex items-end gap-3">
+                      <Field label="Neues Event">
+                        <input
+                          value={newEventName}
+                          onChange={(e) => setNewEventName(e.target.value)}
+                          onFocus={() => setKbField('newEvent')}
+                          placeholder="z. B. Hochzeit Müller"
+                          className={inputCls}
+                        />
+                      </Field>
+                      <button
+                        onClick={addEvent}
+                        disabled={!newEventName.trim()}
+                        className="shrink-0 rounded-lg bg-flare px-4 py-2.5 font-mono text-xs tracking-wide text-ink uppercase transition hover:bg-flare-deep disabled:opacity-50"
+                      >
+                        Anlegen
+                      </button>
+                    </div>
+                    <div className="flex max-h-56 flex-col gap-2 overflow-y-auto p-1">
+                      {events.map((ev) => (
+                        <div
+                          key={ev.id}
+                          className={`flex items-center gap-3 rounded-lg px-3 py-2.5 ring-1 ${
+                            ev.id === activeEventId ? 'bg-flare/10 ring-flare/40' : 'bg-ink/40 ring-cream/10'
+                          }`}
+                        >
+                          <span className="flex-1 truncate font-body text-cream">{ev.name}</span>
+                          {ev.id === activeEventId ? (
+                            <span className="font-mono text-[0.6rem] tracking-widest text-flare uppercase">
+                              aktiv
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => void activateEvent(ev.id)}
+                              className="rounded-md bg-cream/10 px-3 py-1.5 font-mono text-[0.6rem] tracking-widest text-cream uppercase transition hover:bg-cream/20"
+                            >
+                              aktivieren
+                            </button>
+                          )}
+                          {events.length > 1 && (
+                            <button
+                              onClick={() => void removeEvent(ev.id)}
+                              className="font-mono text-[0.6rem] tracking-widest text-cream-dim uppercase transition hover:text-flare"
+                            >
+                              löschen
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                    <p className="font-mono text-[0.65rem] tracking-wide text-cream-dim/70">
+                      Neue Aufnahmen landen im Ordner des aktiven Events. Löschen entfernt auch die Fotos.
+                    </p>
                   </div>
                 )}
 
@@ -312,13 +493,13 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
           ) : null}
         </div>
 
-        {unlocked && form && tab === 'allgemein' && kbOpen && (
-          <OnScreenKeyboard
-            value={form.welcomeText}
-            onChange={(v) => patch({ welcomeText: v })}
-            onClose={() => setKbOpen(false)}
-          />
-        )}
+        {unlocked &&
+          (() => {
+            const kb = kbBinding()
+            return kb ? (
+              <OnScreenKeyboard value={kb.value} onChange={kb.onChange} onClose={() => setKbField(null)} />
+            ) : null
+          })()}
       </div>
     </div>
   )

@@ -7,6 +7,12 @@ const api: PhotoboothApi = {
   saveSettings: (partial, adminPassword) =>
     ipcRenderer.invoke(IPC.saveSettings, partial, adminPassword),
   verifyAdminPassword: (password) => ipcRenderer.invoke(IPC.verifyAdminPassword, password),
+  changeAdminPassword: (oldPin, newPin) =>
+    ipcRenderer.invoke(IPC.changeAdminPassword, oldPin, newPin),
+  listEvents: () => ipcRenderer.invoke(IPC.listEvents),
+  createEvent: (name) => ipcRenderer.invoke(IPC.createEvent, name),
+  setActiveEvent: (id) => ipcRenderer.invoke(IPC.setActiveEvent, id),
+  deleteEvent: (id) => ipcRenderer.invoke(IPC.deleteEvent, id),
   listPrinters: () => ipcRenderer.invoke(IPC.listPrinters),
   pickImageFile: () => ipcRenderer.invoke(IPC.pickImageFile),
   readImageDataUrl: (path) => ipcRenderer.invoke(IPC.readImageDataUrl, path),

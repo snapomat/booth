@@ -9,11 +9,13 @@ import { settingsSchema } from '@shared/types'
 import type { CameraManager } from './camera'
 import type { LiveviewServer } from './liveview-server'
 import {
+  changeAdminPassword,
   getPhotosDir,
   getSettings,
   saveSettings,
   verifyAdminPassword
 } from './config'
+import { createEvent, deleteEvent, getActiveEventDir, listEvents, setActiveEvent } from './events'
 import { composePrint } from './composite'
 import { listPrinters, printFile } from './print'
 import { accentFromPixels, DEFAULT_ACCENT } from './util/color'
@@ -83,7 +85,8 @@ async function persistCapture(original: Buffer): Promise<CaptureResult> {
   const thumb = await sharp(jpeg).resize(480).jpeg({ quality: 68 }).toBuffer()
   const thumbUrl = `data:image/jpeg;base64,${thumb.toString('base64')}`
   const id = randomUUID()
-  const path = join(getPhotosDir(), `${id}.jpg`)
+  // In den Ordner des aktiven Events legen (gruppiert die Aufnahmen).
+  const path = join(await getActiveEventDir(), `${id}.jpg`)
   await writeFile(path, jpeg)
   captures.set(id, path)
   return { id, dataUrl, thumbUrl }
@@ -103,6 +106,27 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
   ipcMain.handle(IPC.verifyAdminPassword, (_e, pw: unknown) =>
     typeof pw === 'string' ? verifyAdminPassword(pw) : false
   )
+
+  ipcMain.handle(IPC.changeAdminPassword, async (_e, oldPin: unknown, newPin: unknown) => {
+    if (typeof oldPin !== 'string' || typeof newPin !== 'string') {
+      throw new Error('Ungültige Eingabe')
+    }
+    await changeAdminPassword(oldPin, newPin)
+  })
+
+  ipcMain.handle(IPC.listEvents, () => listEvents())
+  ipcMain.handle(IPC.createEvent, (_e, name: unknown) => {
+    if (typeof name !== 'string') throw new Error('Ungültiger Event-Name')
+    return createEvent(name)
+  })
+  ipcMain.handle(IPC.setActiveEvent, (_e, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Ungültige Event-ID')
+    return setActiveEvent(id)
+  })
+  ipcMain.handle(IPC.deleteEvent, (_e, id: unknown) => {
+    if (typeof id !== 'string') throw new Error('Ungültige Event-ID')
+    return deleteEvent(id)
+  })
 
   ipcMain.handle(IPC.listPrinters, () => listPrinters())
 

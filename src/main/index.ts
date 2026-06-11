@@ -26,6 +26,11 @@ function loadRenderer(win: BrowserWindow): void {
 /** Erstellt das Fenster neu, wenn der Renderer abstürzt/hängt. */
 function recoverRenderer(reason: string): void {
   log.error(`Renderer verloren (${reason}) – Fenster wird neu erstellt`)
+  // Ausstehenden Reload-Retry verwerfen – er gehörte zum alten Fenster.
+  if (reloadTimer) {
+    clearTimeout(reloadTimer)
+    reloadTimer = null
+  }
   try {
     mainWindow?.destroy()
   } catch (err) {
@@ -48,7 +53,7 @@ function createWindow(): void {
     kiosk: !isDev,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
-      sandbox: false,
+      sandbox: true,
       contextIsolation: true
     }
   })
