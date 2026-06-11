@@ -94,9 +94,10 @@ async function persistCapture(original: Buffer): Promise<CaptureResult> {
   const thumb = await sharp(jpeg).resize(480).jpeg({ quality: 68 }).toBuffer()
   const thumbUrl = `data:image/jpeg;base64,${thumb.toString('base64')}`
   const id = randomUUID()
-  // Lesbarer, sortierbarer Dateiname (Zeitstempel + kurzer Eindeutigkeits-Suffix).
+  // Sortierbar (Zeitstempel) + unerratbar (volle UUID), damit direkte Bild-URLs
+  // in der Galerie nicht durchprobiert werden können.
   const stamp = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')
-  const filename = `${stamp}-${id.slice(0, 4)}.jpg`
+  const filename = `${stamp}-${id}.jpg`
   // In den Ordner des aktiven Events legen (gruppiert die Aufnahmen).
   const active = await getActiveEvent()
   const path = join(await getActiveEventDir(), filename)
