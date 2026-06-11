@@ -131,6 +131,8 @@ export interface UploadStatus {
   configured: boolean
   /** Anzahl noch ausstehender Uploads. */
   pending: number
+  /** Anzahl dauerhaft gescheiterter Uploads (4xx, übersprungen). */
+  failed: number
   /** Letzter Fehler (oder null). */
   lastError: string | null
   /** Zeitpunkt des letzten erfolgreichen Uploads (ISO) oder null. */

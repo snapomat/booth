@@ -650,6 +650,9 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                               )}
                             </span>
                             <span>Warteschlange: {uploadStat.pending}</span>
+                            {uploadStat.failed > 0 && (
+                              <span className="text-flare">Dauerhaft fehlgeschlagen: {uploadStat.failed}</span>
+                            )}
                             {uploadStat.galleryCode && (
                               <span>
                                 Code für Gäste:{' '}

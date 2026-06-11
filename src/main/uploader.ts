@@ -22,10 +22,23 @@ interface QueueItem {
 interface QueueState {
   pending: QueueItem[]
   uploaded: string[]
+  /** Dauerhaft gescheiterte Uploads (4xx) – blockieren die Queue nicht. */
+  failed: QueueItem[]
   codes: Record<string, string>
 }
 
-let state: QueueState = { pending: [], uploaded: [], codes: {} }
+/** Upload-Fehler mit Hinweis, ob ein Retry sinnvoll ist. */
+class UploadError extends Error {
+  constructor(
+    message: string,
+    public readonly permanent: boolean
+  ) {
+    super(message)
+    this.name = 'UploadError'
+  }
+}
+
+let state: QueueState = { pending: [], uploaded: [], failed: [], codes: {} }
 let running = false
 let timer: NodeJS.Timeout | null = null
 let lastError: string | null = null
@@ -37,10 +50,11 @@ function loadState(): void {
     state = {
       pending: Array.isArray(raw.pending) ? raw.pending : [],
       uploaded: Array.isArray(raw.uploaded) ? raw.uploaded : [],
+      failed: Array.isArray(raw.failed) ? raw.failed : [],
       codes: raw.codes && typeof raw.codes === 'object' ? raw.codes : {}
     }
   } catch {
-    state = { pending: [], uploaded: [], codes: {} }
+    state = { pending: [], uploaded: [], failed: [], codes: {} }
   }
 }
 
@@ -52,7 +66,9 @@ async function saveState(): Promise<void> {
 
 function isKnown(filePath: string): boolean {
   return (
-    state.uploaded.includes(filePath) || state.pending.some((i) => i.filePath === filePath)
+    state.uploaded.includes(filePath) ||
+    state.pending.some((i) => i.filePath === filePath) ||
+    state.failed.some((i) => i.filePath === filePath)
   )
 }
 
@@ -97,7 +113,12 @@ async function uploadOne(item: QueueItem, baseUrl: string, token: string): Promi
     body: form,
     signal: AbortSignal.timeout(UPLOAD_TIMEOUT_MS)
   })
-  if (!res.ok) throw new Error(`Ingest ${res.status}: ${(await res.text().catch(() => '')).slice(0, 200)}`)
+  if (!res.ok) {
+    const body = (await res.text().catch(() => '')).slice(0, 200)
+    // 4xx (außer 408 Timeout / 429 Rate-Limit) sind dauerhaft – Retry zwecklos.
+    const permanent = res.status >= 400 && res.status < 500 && res.status !== 408 && res.status !== 429
+    throw new UploadError(`Ingest ${res.status}: ${body}`, permanent)
+  }
   const json = (await res.json().catch(() => null)) as { gallery?: { code?: string } } | null
   const code = json?.gallery?.code
   if (typeof code === 'string') state.codes[item.folderPath] = code
@@ -128,6 +149,15 @@ async function processQueue(): Promise<void> {
         await saveState()
       } catch (err) {
         lastError = err instanceof Error ? err.message : String(err)
+        if (err instanceof UploadError && err.permanent) {
+          // Dauerhaft kaputt (z. B. 400) → in die Dead-Letter-Liste, Queue läuft weiter.
+          log.error('Upload dauerhaft fehlgeschlagen – übersprungen', err)
+          const bad = state.pending.shift()
+          if (bad) state.failed.push(bad)
+          await saveState()
+          continue
+        }
+        // Transient (offline/5xx/Timeout) → unverändert lassen, nächster Tick versucht erneut.
         log.warn('Upload fehlgeschlagen – Retry später', err)
         break
       }
@@ -159,6 +189,7 @@ export async function uploadStatus(): Promise<UploadStatus> {
     enabled: uploadEnabled,
     configured: uploadEnabled && !!galleryBaseUrl.trim() && !!galleryIngestToken.trim(),
     pending: state.pending.length,
+    failed: state.failed.length,
     lastError,
     lastUploadAt,
     galleryCode
