@@ -5,7 +5,8 @@ import type {
   CameraSource,
   DefaultBackground,
   EventInfo,
-  Settings
+  Settings,
+  UploadStatus
 } from '@shared/types'
 import { defaultSettings } from '@shared/types'
 import OnScreenKeyboard from './OnScreenKeyboard'
@@ -17,9 +18,16 @@ interface Props {
   onSaved: (settings: Settings) => void
 }
 
-type Tab = 'allgemein' | 'events' | 'hintergrund' | 'kamera' | 'ai'
+type Tab = 'allgemein' | 'events' | 'hintergrund' | 'kamera' | 'ai' | 'galerie'
 /** Welches Textfeld die On-Screen-Tastatur gerade bedient. */
-type KbField = 'welcomeText' | 'newEvent' | 'pinOld' | 'pinNext' | 'pinConfirm' | 'aiPrompt'
+type KbField =
+  | 'welcomeText'
+  | 'newEvent'
+  | 'pinOld'
+  | 'pinNext'
+  | 'pinConfirm'
+  | 'aiPrompt'
+  | 'galleryUrl'
 
 const sources: CameraSource[] = ['auto', 'gphoto2', 'webcam', 'mock']
 const inputCls =
@@ -43,6 +51,7 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
   const [pinForm, setPinForm] = useState({ old: '', next: '', confirm: '' })
   const [pinMsg, setPinMsg] = useState<string | null>(null)
   const [focusOpen, setFocusOpen] = useState(false)
+  const [uploadStat, setUploadStat] = useState<UploadStatus | null>(null)
 
   const setTab = (t: Tab): void => {
     setTabState(t)
@@ -64,10 +73,30 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
         return { value: pinForm.confirm, onChange: (v) => setPinForm((p) => ({ ...p, confirm: v })) }
       case 'aiPrompt':
         return form ? { value: form.aiPrompt, onChange: (v) => patch({ aiPrompt: v }) } : null
+      case 'galleryUrl':
+        return form ? { value: form.galleryBaseUrl, onChange: (v) => patch({ galleryBaseUrl: v }) } : null
       default:
         return null
     }
   }
+
+  // Upload-Status pollen, solange entsperrt.
+  useEffect(() => {
+    if (!unlocked) return
+    let cancelled = false
+    const tick = (): void => {
+      void window.api
+        .uploadStatus()
+        .then((s) => !cancelled && setUploadStat(s))
+        .catch(() => {})
+    }
+    tick()
+    const id = setInterval(tick, 4000)
+    return () => {
+      cancelled = true
+      clearInterval(id)
+    }
+  }, [unlocked])
 
   // ESC schließt den Admin-Bereich.
   useEffect(() => {
@@ -227,6 +256,9 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                 </TabButton>
                 <TabButton active={tab === 'ai'} onClick={() => setTab('ai')}>
                   AI
+                </TabButton>
+                <TabButton active={tab === 'galerie'} onClick={() => setTab('galerie')}>
+                  Galerie
                 </TabButton>
               </div>
 
@@ -562,6 +594,79 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                         <span className="font-mono text-[0.6rem] tracking-wide text-cream-dim/70">
                           Key wird lokal gespeichert (nicht auf dem Desktop). Leer lassen = Fallback auf
                           <b> OPENAI_API_KEY</b>. Fotos werden zur Verarbeitung an OpenAI gesendet.
+                        </span>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                {tab === 'galerie' && (
+                  <div className="flex flex-col gap-4">
+                    <label className="flex items-center justify-between gap-3 rounded-xl bg-ink/40 px-4 py-3 ring-1 ring-cream/10">
+                      <span className="flex flex-col">
+                        <Label>Upload in die Gallery</Label>
+                        <span className="font-mono text-[0.6rem] text-cream-dim/70">
+                          Alle Aufnahmen automatisch hochladen (offline-tolerant, Queue + Retry).
+                        </span>
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={form.uploadEnabled}
+                        onChange={(e) => patch({ uploadEnabled: e.target.checked })}
+                        className="h-5 w-5 accent-flare"
+                      />
+                    </label>
+                    {form.uploadEnabled && (
+                      <>
+                        <Field label="Gallery-URL">
+                          <input
+                            value={form.galleryBaseUrl}
+                            onChange={(e) => patch({ galleryBaseUrl: e.target.value })}
+                            onFocus={() => setKbField('galleryUrl')}
+                            placeholder="https://gallery.example.com"
+                            spellCheck={false}
+                            className={inputCls}
+                          />
+                        </Field>
+                        <Field label="Ingest-Token">
+                          <input
+                            type="password"
+                            autoComplete="off"
+                            spellCheck={false}
+                            placeholder="Bearer-Token"
+                            value={form.galleryIngestToken}
+                            onChange={(e) => patch({ galleryIngestToken: e.target.value })}
+                            className={inputCls}
+                          />
+                        </Field>
+                        {uploadStat && (
+                          <div className="flex flex-col gap-1 rounded-lg bg-ink/40 px-4 py-3 font-mono text-xs text-cream-dim ring-1 ring-cream/10">
+                            <span>
+                              Status:{' '}
+                              {uploadStat.configured ? (
+                                <span className="text-emerald-400">aktiv</span>
+                              ) : (
+                                <span className="text-flare">unvollständig konfiguriert</span>
+                              )}
+                            </span>
+                            <span>Warteschlange: {uploadStat.pending}</span>
+                            {uploadStat.galleryCode && (
+                              <span>
+                                Code für Gäste:{' '}
+                                <b className="tracking-[0.3em] text-cream">{uploadStat.galleryCode}</b>
+                              </span>
+                            )}
+                            {uploadStat.lastUploadAt && (
+                              <span>Letzter Upload: {new Date(uploadStat.lastUploadAt).toLocaleString()}</span>
+                            )}
+                            {uploadStat.lastError && (
+                              <span className="text-flare">Letzter Fehler: {uploadStat.lastError}</span>
+                            )}
+                          </div>
+                        )}
+                        <span className="font-mono text-[0.6rem] tracking-wide text-cream-dim/70">
+                          Token lokal gespeichert (nicht auf dem Desktop). Die Galerie wird beim ersten
+                          Upload automatisch angelegt; der Code erscheint hier.
                         </span>
                       </>
                     )}

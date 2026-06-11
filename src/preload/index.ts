@@ -28,6 +28,7 @@ const api: PhotoboothApi = {
   print: (captureId) => ipcRenderer.invoke(IPC.print, captureId),
   aiStatus: () => ipcRenderer.invoke(IPC.aiStatus),
   aiStylize: (captureId) => ipcRenderer.invoke(IPC.aiStylize, captureId),
+  uploadStatus: () => ipcRenderer.invoke(IPC.uploadStatus),
   onCameraStatus: (cb) => {
     const listener = (_e: IpcRendererEvent, status: CameraStatus): void => cb(status)
     ipcRenderer.on(IPC.cameraStatus, listener)

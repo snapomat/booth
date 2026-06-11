@@ -5,6 +5,7 @@ import type { CameraStatus } from '@shared/types'
 import { CameraManager } from './camera'
 import { LiveviewServer } from './liveview-server'
 import { registerIpc } from './ipc'
+import { initUploader, disposeUploader } from './uploader'
 import { createLogger } from './util/logger'
 
 const log = createLogger('main')
@@ -101,6 +102,7 @@ async function bootstrap(): Promise<void> {
   await camera.detect().catch((err) => log.error('Kamera-Erkennung fehlgeschlagen', err))
   await liveview.start().catch((err) => log.error('Liveview-Server-Start fehlgeschlagen', err))
   registerIpc(camera, liveview)
+  initUploader()
 
   // Liveview wird NICHT automatisch gestartet – erst on-demand beim Auslösen,
   // um Spiegel/Sensor der DSLR zu schonen.
@@ -137,4 +139,5 @@ app.on('will-quit', () => {
   globalShortcut.unregisterAll()
   camera.dispose()
   liveview.stop()
+  disposeUploader()
 })

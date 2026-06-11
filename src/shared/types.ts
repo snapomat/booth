@@ -42,7 +42,13 @@ export const settingsSchema = z.object({
   /** OpenAI-API-Key (lokal gespeichert; leer = Fallback auf OPENAI_API_KEY-Env). */
   aiApiKey: z.string(),
   /** OpenAI-Bildmodell (z. B. gpt-image-1). */
-  aiModel: z.string()
+  aiModel: z.string(),
+  /** Aufnahmen automatisch in die Snapomat-Gallery hochladen. */
+  uploadEnabled: z.boolean(),
+  /** Basis-URL der Gallery (z. B. https://gallery.example.com). */
+  galleryBaseUrl: z.string(),
+  /** Ingest-Token der Gallery (Bearer; lokal gespeichert). */
+  galleryIngestToken: z.string()
 })
 
 export type Settings = z.infer<typeof settingsSchema>
@@ -62,7 +68,10 @@ export const defaultSettings: Settings = {
   aiPrompt:
     'Verwandle dieses Foto in ein hochwertiges, künstlerisches Studio-Portrait. Bewahre Gesicht, Identität und Pose der Person exakt.',
   aiApiKey: '',
-  aiModel: 'gpt-image-1'
+  aiModel: 'gpt-image-1',
+  uploadEnabled: false,
+  galleryBaseUrl: '',
+  galleryIngestToken: ''
 }
 
 /** Zustand der Kamera-Anbindung. */
@@ -112,6 +121,22 @@ export interface EventInfo {
 export interface EventsState {
   events: EventInfo[]
   activeId: string | null
+}
+
+/** Status des Gallery-Uploads (für den Admin-Bereich). */
+export interface UploadStatus {
+  /** Upload in den Settings aktiviert. */
+  enabled: boolean
+  /** Aktiviert UND Basis-URL + Token gesetzt. */
+  configured: boolean
+  /** Anzahl noch ausstehender Uploads. */
+  pending: number
+  /** Letzter Fehler (oder null). */
+  lastError: string | null
+  /** Zeitpunkt des letzten erfolgreichen Uploads (ISO) oder null. */
+  lastUploadAt: string | null
+  /** Galerie-Code des aktiven Events (zum Anzeigen für Gäste), falls bekannt. */
+  galleryCode: string | null
 }
 
 /** Ergebnis einer Aufnahme. */
@@ -166,5 +191,7 @@ export interface PhotoboothApi {
   aiStatus(): Promise<boolean>
   /** Erzeugt eine AI-stilisierte Variante einer Aufnahme (druckfertig, eigene ID). */
   aiStylize(captureId: string): Promise<CaptureResult>
+  /** Status des Gallery-Uploads (aktiv?, Warteschlange, letzter Fehler, Code). */
+  uploadStatus(): Promise<UploadStatus>
   onCameraStatus(cb: (status: CameraStatus) => void): () => void
 }

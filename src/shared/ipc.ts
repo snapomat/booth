@@ -23,5 +23,6 @@ export const IPC = {
   print: 'print:run',
   aiStatus: 'ai:status',
   aiStylize: 'ai:stylize',
+  uploadStatus: 'upload:status',
   cameraStatus: 'camera:status'
 } as const

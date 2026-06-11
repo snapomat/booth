@@ -15,8 +15,16 @@ import {
   saveSettings,
   verifyAdminPassword
 } from './config'
-import { createEvent, deleteEvent, getActiveEventDir, listEvents, setActiveEvent } from './events'
+import {
+  createEvent,
+  deleteEvent,
+  getActiveEvent,
+  getActiveEventDir,
+  listEvents,
+  setActiveEvent
+} from './events'
 import { resolveApiKey, stylizePhoto } from './ai-portraits'
+import { enqueueUpload, uploadStatus } from './uploader'
 import { composePrint } from './composite'
 import { listPrinters, printFile } from './print'
 import { accentFromPixels, DEFAULT_ACCENT } from './util/color'
@@ -90,9 +98,12 @@ async function persistCapture(original: Buffer): Promise<CaptureResult> {
   const stamp = new Date().toISOString().slice(0, 19).replace('T', '_').replace(/:/g, '-')
   const filename = `${stamp}-${id.slice(0, 4)}.jpg`
   // In den Ordner des aktiven Events legen (gruppiert die Aufnahmen).
+  const active = await getActiveEvent()
   const path = join(await getActiveEventDir(), filename)
   await writeFile(path, jpeg)
   captures.set(id, path)
+  // Alle Aufnahmen zum Gallery-Upload einreihen (no-op, wenn deaktiviert).
+  enqueueUpload({ filePath: path, folderPath: active.dir, title: active.name })
   return { id, dataUrl, thumbUrl }
 }
 
@@ -260,6 +271,8 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
       throw err
     }
   })
+
+  handle(IPC.uploadStatus, () => uploadStatus())
 
   // Startup-Marker: erscheint dieser im Terminal, läuft der aktuelle Main-Stand (inkl. AI-Handler).
   log.info('IPC-Handler registriert (inkl. AI)')
