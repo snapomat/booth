@@ -17,7 +17,7 @@ interface Props {
 
 type Tab = 'allgemein' | 'events' | 'hintergrund' | 'kamera'
 /** Welches Textfeld die On-Screen-Tastatur gerade bedient. */
-type KbField = 'welcomeText' | 'newEvent' | 'pinOld' | 'pinNext' | 'pinConfirm'
+type KbField = 'welcomeText' | 'newEvent' | 'pinOld' | 'pinNext' | 'pinConfirm' | 'aiPrompt'
 
 const sources: CameraSource[] = ['auto', 'gphoto2', 'webcam', 'mock']
 const inputCls =
@@ -59,6 +59,8 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
         return { value: pinForm.next, onChange: (v) => setPinForm((p) => ({ ...p, next: v })) }
       case 'pinConfirm':
         return { value: pinForm.confirm, onChange: (v) => setPinForm((p) => ({ ...p, confirm: v })) }
+      case 'aiPrompt':
+        return form ? { value: form.aiPrompt, onChange: (v) => patch({ aiPrompt: v }) } : null
       default:
         return null
     }
@@ -478,6 +480,40 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                         ))}
                       </select>
                     </Field>
+
+                    <div className="flex flex-col gap-3 rounded-xl bg-ink/40 p-4 ring-1 ring-cream/10">
+                      <label className="flex items-center justify-between gap-3">
+                        <span className="flex flex-col">
+                          <Label>AI-Portraits</Label>
+                          <span className="font-mono text-[0.6rem] text-cream-dim/70">
+                            Gast kann optional eine AI-Variante wählen (online).
+                          </span>
+                        </span>
+                        <input
+                          type="checkbox"
+                          checked={form.aiEnabled}
+                          onChange={(e) => patch({ aiEnabled: e.target.checked })}
+                          className="h-5 w-5 accent-flare"
+                        />
+                      </label>
+                      {form.aiEnabled && (
+                        <>
+                          <Field label="Stil-Prompt">
+                            <textarea
+                              rows={3}
+                              value={form.aiPrompt}
+                              onChange={(e) => patch({ aiPrompt: e.target.value })}
+                              onFocus={() => setKbField('aiPrompt')}
+                              className={`${inputCls} resize-none`}
+                            />
+                          </Field>
+                          <span className="font-mono text-[0.6rem] tracking-wide text-cream-dim/70">
+                            API-Key über Umgebungsvariable <b>OPENAI_API_KEY</b> setzen (nicht in der App
+                            gespeichert). Fotos werden zur Verarbeitung an OpenAI gesendet.
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 )}
               </div>

@@ -16,6 +16,7 @@ import {
   verifyAdminPassword
 } from './config'
 import { createEvent, deleteEvent, getActiveEventDir, listEvents, setActiveEvent } from './events'
+import { isAiConfigured, stylizePhoto } from './ai-portraits'
 import { composePrint } from './composite'
 import { listPrinters, printFile } from './print'
 import { accentFromPixels, DEFAULT_ACCENT } from './util/color'
@@ -212,6 +213,27 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '')
     const original = Buffer.from(base64, 'base64')
     return persistCapture(original)
+  })
+
+  ipcMain.handle(IPC.aiStatus, async () => {
+    const { aiEnabled } = await getSettings()
+    return aiEnabled && isAiConfigured()
+  })
+
+  ipcMain.handle(IPC.aiStylize, async (_e, captureId: unknown) => {
+    if (typeof captureId !== 'string') throw new Error('Ungültige Aufnahme-ID')
+    const srcPath = captures.get(captureId)
+    if (!srcPath) throw new Error('Aufnahme nicht gefunden')
+    const { aiEnabled, aiPrompt } = await getSettings()
+    if (!aiEnabled || !isAiConfigured()) throw new Error('AI-Portraits sind nicht aktiv')
+    try {
+      const original = await readFile(srcPath)
+      const styled = await stylizePhoto(original, aiPrompt)
+      return await persistCapture(styled)
+    } catch (err) {
+      log.error('AI-Stilisierung fehlgeschlagen', err)
+      throw err
+    }
   })
 
   ipcMain.handle(IPC.print, async (_e, captureId: unknown) => {

@@ -21,5 +21,7 @@ export const IPC = {
   capture: 'camera:capture',
   captureFromDataUrl: 'camera:captureFromDataUrl',
   print: 'print:run',
+  aiStatus: 'ai:status',
+  aiStylize: 'ai:stylize',
   cameraStatus: 'camera:status'
 } as const

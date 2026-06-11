@@ -34,7 +34,11 @@ export const settingsSchema = z.object({
   /** Deckkraft des Hintergrundbilds (0–1). */
   backgroundOpacity: z.number().min(0).max(1),
   /** Akzentfarbe (Buttons, Countdown-Ring etc.) als Hex. */
-  accentColor: z.string()
+  accentColor: z.string(),
+  /** AI-Portraits anbieten (benötigt OPENAI_API_KEY in der Umgebung). */
+  aiEnabled: z.boolean(),
+  /** Stil-Anweisung für die AI-Variante. */
+  aiPrompt: z.string()
 })
 
 export type Settings = z.infer<typeof settingsSchema>
@@ -49,7 +53,10 @@ export const defaultSettings: Settings = {
   backgroundImagePath: null,
   backgroundDefault: null,
   backgroundOpacity: 0.35,
-  accentColor: '#e8a23c'
+  accentColor: '#e8a23c',
+  aiEnabled: false,
+  aiPrompt:
+    'Verwandle dieses Foto in ein hochwertiges, künstlerisches Studio-Portrait. Bewahre Gesicht, Identität und Pose der Person exakt.'
 }
 
 /** Zustand der Kamera-Anbindung. */
@@ -147,5 +154,9 @@ export interface PhotoboothApi {
   /** Aufnahme aus einem im Renderer erzeugten Bild (Webcam/Continuity Camera). */
   captureFromDataUrl(dataUrl: string): Promise<CaptureResult>
   print(captureId: string): Promise<void>
+  /** True, wenn AI-Portraits aktiv sind (in Settings aktiviert UND API-Key gesetzt). */
+  aiStatus(): Promise<boolean>
+  /** Erzeugt eine AI-stilisierte Variante einer Aufnahme (druckfertig, eigene ID). */
+  aiStylize(captureId: string): Promise<CaptureResult>
   onCameraStatus(cb: (status: CameraStatus) => void): () => void
 }

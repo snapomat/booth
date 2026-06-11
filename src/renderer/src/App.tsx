@@ -36,12 +36,17 @@ export default function App(): React.JSX.Element {
   const [bgIndex, setBgIndex] = useState(0)
   // Nur Thumbnails der letzten Fotos halten – das große Bild existiert nur einmal.
   const [history, setHistory] = useState<{ id: string; thumbUrl: string }[]>([])
+  const [aiEnabled, setAiEnabled] = useState(false)
+  const [aiVariant, setAiVariant] = useState<CaptureResult | null>(null)
+  const [useAi, setUseAi] = useState(false)
+  const [aiBusy, setAiBusy] = useState(false)
   const busy = useRef(false)
   const cancelled = useRef(false)
 
   useEffect(() => {
     void window.api.getSettings().then(setSettings)
     void window.api.getDefaultBackgrounds().then(setDefaults)
+    void window.api.aiStatus().then(setAiEnabled)
   }, [])
 
   // Eigenes Hintergrundbild laden (null = Standard-Slideshow).
@@ -76,6 +81,9 @@ export default function App(): React.JSX.Element {
 
   const reset = useCallback(() => {
     setCapture(null)
+    setAiVariant(null)
+    setUseAi(false)
+    setAiBusy(false)
     setError(null)
     setPhase('idle')
     busy.current = false
@@ -92,6 +100,8 @@ export default function App(): React.JSX.Element {
     cancelled.current = false
     setError(null)
     setCapture(null)
+    setAiVariant(null)
+    setUseAi(false)
     // Liveview erst jetzt hochfahren (DSLR-Spiegel/Sensor schonen).
     await cam.startLiveview()
     const total = settings?.countdownSeconds ?? 3
@@ -129,11 +139,31 @@ export default function App(): React.JSX.Element {
     void runShot()
   }, [phase, adminOpen, runShot])
 
+  // Aktuell gezeigtes/zu druckendes Bild: Original oder AI-Variante.
+  const shown = useAi && aiVariant ? aiVariant : capture
+
+  const generateAi = useCallback(async () => {
+    if (!capture || aiBusy) return
+    setAiBusy(true)
+    setError(null)
+    try {
+      const variant = await window.api.aiStylize(capture.id)
+      setAiVariant(variant)
+      setUseAi(true)
+      setReviewLeft(settings?.reviewTimeoutSeconds ?? 3)
+    } catch (err) {
+      console.error(err)
+      setError('AI-Variante fehlgeschlagen')
+    } finally {
+      setAiBusy(false)
+    }
+  }, [capture, aiBusy, settings])
+
   const doPrint = useCallback(async () => {
-    if (!capture) return
+    if (!shown) return
     setPhase('printing')
     try {
-      await window.api.print(capture.id)
+      await window.api.print(shown.id)
       setPhase('thanks')
       await sleep(3500)
       reset()
@@ -143,11 +173,12 @@ export default function App(): React.JSX.Element {
       setReviewLeft(settings?.reviewTimeoutSeconds ?? 3)
       setPhase('review')
     }
-  }, [capture, reset, settings])
+  }, [shown, reset, settings])
 
   // Review-/Druck-Screen: nach konfiguriertem Timeout zurück zum Start.
+  // Während die AI-Variante erzeugt wird, pausiert der Countdown.
   useEffect(() => {
-    if (phase !== 'review') return
+    if (phase !== 'review' || aiBusy) return
     const id = setInterval(() => {
       setReviewLeft((s) => {
         if (s <= 1) {
@@ -159,7 +190,7 @@ export default function App(): React.JSX.Element {
       })
     }, 1000)
     return () => clearInterval(id)
-  }, [phase, reset])
+  }, [phase, reset, aiBusy])
 
   const reviewTotal = settings?.reviewTimeoutSeconds ?? 3
   const bgOpacity = settings?.backgroundOpacity ?? 0.35
@@ -343,25 +374,49 @@ export default function App(): React.JSX.Element {
           {/* Aktuelles Bild groß + Aktionen */}
           <div className="absolute inset-0 z-20 flex flex-col items-center justify-center gap-8">
             <img
-              src={capture.dataUrl}
+              key={(shown ?? capture).id}
+              src={(shown ?? capture).dataUrl}
               alt="Aufnahme"
               className="gpu max-h-[52vh] max-w-[64vw] rounded-2xl object-contain shadow-[0_30px_90px_-15px_rgba(0,0,0,0.9)] ring-1 ring-cream/20"
               style={{ animation: 'printin 0.5s ease-out' }}
             />
+
+            {/* Umschalter Original ↔ AI, sobald eine Variante existiert */}
+            {aiVariant && (
+              <div className="flex items-center gap-2">
+                <SwitchChip active={!useAi} onClick={() => setUseAi(false)}>
+                  Original
+                </SwitchChip>
+                <SwitchChip active={useAi} onClick={() => setUseAi(true)}>
+                  ✨ AI
+                </SwitchChip>
+              </div>
+            )}
 
             {error && <ErrorCard>{error}</ErrorCard>}
 
             <div className="flex items-center gap-5">
               <button
                 onClick={() => void runShot()}
-                className="rounded-full border border-cream/25 bg-ink/40 px-10 py-5 font-mono text-sm tracking-widest text-cream uppercase backdrop-blur transition hover:bg-cream/10"
+                disabled={aiBusy}
+                className="rounded-full border border-cream/25 bg-ink/40 px-10 py-5 font-mono text-sm tracking-widest text-cream uppercase backdrop-blur transition hover:bg-cream/10 disabled:opacity-40"
               >
                 Nochmal
               </button>
+              {aiEnabled && !aiVariant && (
+                <button
+                  onClick={() => void generateAi()}
+                  disabled={aiBusy}
+                  className="rounded-full border border-flare/50 bg-flare/10 px-10 py-5 font-mono text-sm tracking-widest text-cream uppercase backdrop-blur transition hover:bg-flare/20 disabled:opacity-60"
+                >
+                  {aiBusy ? 'AI erstellt …' : '✨ AI-Style'}
+                </button>
+              )}
               {canPrint && (
                 <button
                   onClick={doPrint}
-                  className="rounded-full bg-flare px-14 py-5 font-display text-2xl font-medium text-ink shadow-lg transition hover:bg-flare-deep"
+                  disabled={aiBusy}
+                  className="rounded-full bg-flare px-14 py-5 font-display text-2xl font-medium text-ink shadow-lg transition hover:bg-flare-deep disabled:opacity-60"
                 >
                   Drucken
                 </button>
@@ -416,6 +471,27 @@ function Overlay({ children }: { children: React.ReactNode }): React.JSX.Element
 
 function Spinner(): React.JSX.Element {
   return <span className="h-14 w-14 animate-spin rounded-full border-2 border-cream/20 border-t-flare" />
+}
+
+function SwitchChip({
+  active,
+  onClick,
+  children
+}: {
+  active: boolean
+  onClick: () => void
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <button
+      onClick={onClick}
+      className={`rounded-full px-6 py-2 font-mono text-xs tracking-widest uppercase transition ${
+        active ? 'bg-flare text-ink' : 'bg-cream/5 text-cream-dim hover:bg-cream/15'
+      }`}
+    >
+      {children}
+    </button>
+  )
 }
 
 function ErrorCard({ children }: { children: React.ReactNode }): React.JSX.Element {
