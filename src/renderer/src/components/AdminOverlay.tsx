@@ -505,6 +505,13 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                     </label>
                     {form.aiEnabled && (
                       <>
+                        {!form.aiApiKey.trim() && (
+                          <div className="rounded-lg bg-flare/10 px-4 py-2.5 font-mono text-[0.65rem] leading-relaxed text-cream ring-1 ring-flare/40">
+                            Kein API-Key gesetzt – AI wird im Booth nur angeboten, wenn hier ein Key steht
+                            (oder die Umgebungsvariable OPENAI_API_KEY existiert). Nach dem Speichern lädt
+                            die App neu.
+                          </div>
+                        )}
                         <div className="grid grid-cols-[1fr_auto] gap-3">
                           <Field label="OpenAI-API-Key">
                             <input

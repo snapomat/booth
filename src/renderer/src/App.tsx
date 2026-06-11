@@ -153,7 +153,7 @@ export default function App(): React.JSX.Element {
       setReviewLeft(settings?.reviewTimeoutSeconds ?? 3)
     } catch (err) {
       console.error(err)
-      setError('AI-Variante fehlgeschlagen')
+      setError(err instanceof Error ? err.message : 'AI-Variante fehlgeschlagen')
     } finally {
       setAiBusy(false)
     }
