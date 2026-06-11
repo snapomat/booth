@@ -94,9 +94,16 @@ async function persistCapture(original: Buffer): Promise<CaptureResult> {
 }
 
 export function registerIpc(camera: CameraManager, liveview: LiveviewServer): void {
-  ipcMain.handle(IPC.getSettings, () => getSettings())
+  // Idempotent registrieren: bei erneutem Aufruf (z. B. Main-HMR) zuerst den
+  // alten Handler entfernen, statt an „second handler"-Fehlern abzubrechen.
+  const handle = (channel: string, listener: Parameters<typeof ipcMain.handle>[1]): void => {
+    ipcMain.removeHandler(channel)
+    ipcMain.handle(channel, listener)
+  }
 
-  ipcMain.handle(IPC.saveSettings, async (_e, partial: unknown, adminPassword: unknown) => {
+  handle(IPC.getSettings, () => getSettings())
+
+  handle(IPC.saveSettings, async (_e, partial: unknown, adminPassword: unknown) => {
     if (typeof adminPassword !== 'string' || !(await verifyAdminPassword(adminPassword))) {
       throw new Error('Falsches Admin-Passwort')
     }
@@ -104,34 +111,34 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     return saveSettings(parsed)
   })
 
-  ipcMain.handle(IPC.verifyAdminPassword, (_e, pw: unknown) =>
+  handle(IPC.verifyAdminPassword, (_e, pw: unknown) =>
     typeof pw === 'string' ? verifyAdminPassword(pw) : false
   )
 
-  ipcMain.handle(IPC.changeAdminPassword, async (_e, oldPin: unknown, newPin: unknown) => {
+  handle(IPC.changeAdminPassword, async (_e, oldPin: unknown, newPin: unknown) => {
     if (typeof oldPin !== 'string' || typeof newPin !== 'string') {
       throw new Error('Ungültige Eingabe')
     }
     await changeAdminPassword(oldPin, newPin)
   })
 
-  ipcMain.handle(IPC.listEvents, () => listEvents())
-  ipcMain.handle(IPC.createEvent, (_e, name: unknown) => {
+  handle(IPC.listEvents, () => listEvents())
+  handle(IPC.createEvent, (_e, name: unknown) => {
     if (typeof name !== 'string') throw new Error('Ungültiger Event-Name')
     return createEvent(name)
   })
-  ipcMain.handle(IPC.setActiveEvent, (_e, id: unknown) => {
+  handle(IPC.setActiveEvent, (_e, id: unknown) => {
     if (typeof id !== 'string') throw new Error('Ungültige Event-ID')
     return setActiveEvent(id)
   })
-  ipcMain.handle(IPC.deleteEvent, (_e, id: unknown) => {
+  handle(IPC.deleteEvent, (_e, id: unknown) => {
     if (typeof id !== 'string') throw new Error('Ungültige Event-ID')
     return deleteEvent(id)
   })
 
-  ipcMain.handle(IPC.listPrinters, () => listPrinters())
+  handle(IPC.listPrinters, () => listPrinters())
 
-  ipcMain.handle(IPC.pickImageFile, async () => {
+  handle(IPC.pickImageFile, async () => {
     const result = await dialog.showOpenDialog({
       properties: ['openFile'],
       filters: [{ name: 'Bilder', extensions: ['png', 'jpg', 'jpeg', 'webp'] }]
@@ -139,11 +146,11 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     return result.canceled ? null : (result.filePaths[0] ?? null)
   })
 
-  ipcMain.handle(IPC.readImageDataUrl, (_e, path: unknown) =>
+  handle(IPC.readImageDataUrl, (_e, path: unknown) =>
     typeof path === 'string' ? imageToDataUrl(path) : null
   )
 
-  ipcMain.handle(IPC.getDefaultBackgrounds, async () => {
+  handle(IPC.getDefaultBackgrounds, async () => {
     try {
       const dir = backgroundsDir()
       const files = (await readdir(dir)).filter((f) => imageMime[extname(f).toLowerCase()]).sort()
@@ -160,13 +167,13 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     }
   })
 
-  ipcMain.handle(IPC.cameraDiagnostics, () => ({
+  handle(IPC.cameraDiagnostics, () => ({
     gphoto2Missing: camera.isGphoto2Missing(),
     cameraDetected: camera.isAvailable(),
     platform: process.platform
   }))
 
-  ipcMain.handle(IPC.installGphoto2, async () => {
+  handle(IPC.installGphoto2, async () => {
     if (process.platform !== 'linux') {
       return {
         ok: false,
@@ -186,14 +193,14 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     }
   })
 
-  ipcMain.handle(IPC.resolveCameraSource, () => resolveCameraSource(camera))
+  handle(IPC.resolveCameraSource, () => resolveCameraSource(camera))
 
-  ipcMain.handle(IPC.liveviewUrl, () => liveview.url())
+  handle(IPC.liveviewUrl, () => liveview.url())
 
-  ipcMain.handle(IPC.startLiveview, () => camera.startLiveview())
-  ipcMain.handle(IPC.stopLiveview, () => camera.stopLiveview())
+  handle(IPC.startLiveview, () => camera.startLiveview())
+  handle(IPC.stopLiveview, () => camera.stopLiveview())
 
-  ipcMain.handle(IPC.capture, async () => {
+  handle(IPC.capture, async () => {
     const origPath = join(getPhotosDir(), `${randomUUID()}.orig.jpg`)
     try {
       const original = await camera.capture(origPath)
@@ -208,19 +215,19 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     }
   })
 
-  ipcMain.handle(IPC.captureFromDataUrl, async (_e, dataUrl: unknown) => {
+  handle(IPC.captureFromDataUrl, async (_e, dataUrl: unknown) => {
     if (typeof dataUrl !== 'string') throw new Error('Ungültige Bilddaten')
     const base64 = dataUrl.replace(/^data:image\/\w+;base64,/, '')
     const original = Buffer.from(base64, 'base64')
     return persistCapture(original)
   })
 
-  ipcMain.handle(IPC.aiStatus, async () => {
+  handle(IPC.aiStatus, async () => {
     const { aiEnabled, aiApiKey } = await getSettings()
     return aiEnabled && !!resolveApiKey(aiApiKey)
   })
 
-  ipcMain.handle(IPC.aiStylize, async (_e, captureId: unknown) => {
+  handle(IPC.aiStylize, async (_e, captureId: unknown) => {
     if (typeof captureId !== 'string') throw new Error('Ungültige Aufnahme-ID')
     const srcPath = captures.get(captureId)
     if (!srcPath) throw new Error('Aufnahme nicht gefunden')
@@ -237,7 +244,7 @@ export function registerIpc(camera: CameraManager, liveview: LiveviewServer): vo
     }
   })
 
-  ipcMain.handle(IPC.print, async (_e, captureId: unknown) => {
+  handle(IPC.print, async (_e, captureId: unknown) => {
     if (typeof captureId !== 'string') throw new Error('Ungültige Aufnahme-ID')
     const path = captures.get(captureId)
     if (!path) throw new Error('Aufnahme nicht gefunden')
