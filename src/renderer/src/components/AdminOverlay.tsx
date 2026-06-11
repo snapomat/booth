@@ -7,6 +7,7 @@ import type {
   EventInfo,
   Settings
 } from '@shared/types'
+import { defaultSettings } from '@shared/types'
 import OnScreenKeyboard from './OnScreenKeyboard'
 
 interface Props {
@@ -15,7 +16,7 @@ interface Props {
   onSaved: (settings: Settings) => void
 }
 
-type Tab = 'allgemein' | 'events' | 'hintergrund' | 'kamera'
+type Tab = 'allgemein' | 'events' | 'hintergrund' | 'kamera' | 'ai'
 /** Welches Textfeld die On-Screen-Tastatur gerade bedient. */
 type KbField = 'welcomeText' | 'newEvent' | 'pinOld' | 'pinNext' | 'pinConfirm' | 'aiPrompt'
 
@@ -209,7 +210,7 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
           ) : form ? (
             <div className="flex flex-col gap-5">
               {/* Tab-Leiste */}
-              <div className="flex gap-2">
+              <div className="flex flex-wrap gap-2">
                 <TabButton active={tab === 'allgemein'} onClick={() => setTab('allgemein')}>
                   Allgemein
                 </TabButton>
@@ -221,6 +222,9 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                 </TabButton>
                 <TabButton active={tab === 'kamera'} onClick={() => setTab('kamera')}>
                   Kamera & Druck
+                </TabButton>
+                <TabButton active={tab === 'ai'} onClick={() => setTab('ai')}>
+                  AI
                 </TabButton>
               </div>
 
@@ -480,61 +484,72 @@ export default function AdminOverlay({ settings, onClose, onSaved }: Props): Rea
                         ))}
                       </select>
                     </Field>
+                  </div>
+                )}
 
-                    <div className="flex flex-col gap-3 rounded-xl bg-ink/40 p-4 ring-1 ring-cream/10">
-                      <label className="flex items-center justify-between gap-3">
-                        <span className="flex flex-col">
-                          <Label>AI-Portraits</Label>
-                          <span className="font-mono text-[0.6rem] text-cream-dim/70">
-                            Gast kann optional eine AI-Variante wählen (online).
-                          </span>
+                {tab === 'ai' && (
+                  <div className="flex flex-col gap-4">
+                    <label className="flex items-center justify-between gap-3 rounded-xl bg-ink/40 px-4 py-3 ring-1 ring-cream/10">
+                      <span className="flex flex-col">
+                        <Label>AI-Portraits</Label>
+                        <span className="font-mono text-[0.6rem] text-cream-dim/70">
+                          Gast kann optional eine AI-Variante wählen (online).
                         </span>
-                        <input
-                          type="checkbox"
-                          checked={form.aiEnabled}
-                          onChange={(e) => patch({ aiEnabled: e.target.checked })}
-                          className="h-5 w-5 accent-flare"
-                        />
-                      </label>
-                      {form.aiEnabled && (
-                        <>
-                          <div className="grid grid-cols-[1fr_auto] gap-3">
-                            <Field label="OpenAI-API-Key">
-                              <input
-                                type="password"
-                                autoComplete="off"
-                                spellCheck={false}
-                                placeholder="sk-…"
-                                value={form.aiApiKey}
-                                onChange={(e) => patch({ aiApiKey: e.target.value })}
-                                className={inputCls}
-                              />
-                            </Field>
-                            <Field label="Modell">
-                              <input
-                                value={form.aiModel}
-                                onChange={(e) => patch({ aiModel: e.target.value })}
-                                spellCheck={false}
-                                className={`${inputCls} w-44`}
-                              />
-                            </Field>
-                          </div>
-                          <Field label="Stil-Prompt">
-                            <textarea
-                              rows={3}
-                              value={form.aiPrompt}
-                              onChange={(e) => patch({ aiPrompt: e.target.value })}
-                              onFocus={() => setKbField('aiPrompt')}
-                              className={`${inputCls} resize-none`}
+                      </span>
+                      <input
+                        type="checkbox"
+                        checked={form.aiEnabled}
+                        onChange={(e) => patch({ aiEnabled: e.target.checked })}
+                        className="h-5 w-5 accent-flare"
+                      />
+                    </label>
+                    {form.aiEnabled && (
+                      <>
+                        <div className="grid grid-cols-[1fr_auto] gap-3">
+                          <Field label="OpenAI-API-Key">
+                            <input
+                              type="password"
+                              autoComplete="off"
+                              spellCheck={false}
+                              placeholder="sk-…"
+                              value={form.aiApiKey}
+                              onChange={(e) => patch({ aiApiKey: e.target.value })}
+                              className={inputCls}
                             />
                           </Field>
-                          <span className="font-mono text-[0.6rem] tracking-wide text-cream-dim/70">
-                            Key wird lokal gespeichert (nicht auf dem Desktop). Leer lassen = Fallback auf
-                            <b> OPENAI_API_KEY</b>. Fotos werden zur Verarbeitung an OpenAI gesendet.
-                          </span>
-                        </>
-                      )}
-                    </div>
+                          <Field label="Modell">
+                            <input
+                              value={form.aiModel}
+                              onChange={(e) => patch({ aiModel: e.target.value })}
+                              spellCheck={false}
+                              className={`${inputCls} w-44`}
+                            />
+                          </Field>
+                        </div>
+                        <div className="flex flex-col gap-2">
+                          <div className="flex items-center justify-between">
+                            <Label>Stil-Prompt</Label>
+                            <button
+                              onClick={() => patch({ aiPrompt: defaultSettings.aiPrompt })}
+                              className="font-mono text-[0.6rem] tracking-wide text-cream-dim uppercase transition hover:text-flare"
+                            >
+                              Standard
+                            </button>
+                          </div>
+                          <textarea
+                            rows={4}
+                            value={form.aiPrompt}
+                            onChange={(e) => patch({ aiPrompt: e.target.value })}
+                            onFocus={() => setKbField('aiPrompt')}
+                            className={`${inputCls} resize-none`}
+                          />
+                        </div>
+                        <span className="font-mono text-[0.6rem] tracking-wide text-cream-dim/70">
+                          Key wird lokal gespeichert (nicht auf dem Desktop). Leer lassen = Fallback auf
+                          <b> OPENAI_API_KEY</b>. Fotos werden zur Verarbeitung an OpenAI gesendet.
+                        </span>
+                      </>
+                    )}
                   </div>
                 )}
               </div>
